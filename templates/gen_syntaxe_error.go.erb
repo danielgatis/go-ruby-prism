@@ -1,0 +1,43 @@
+package parser
+
+type SyntaxErrorLevel int
+type SyntaxErrorType int
+
+const (
+	SyntaxErrorFatal SyntaxErrorLevel = iota
+	SyntaxErrorArgument
+)
+
+const (
+<%- errors.each.with_index do |error, i| -%>
+  <%= error.name %> SyntaxErrorType = <%= i %>
+<%- end -%>
+)
+
+var SyntaxErrorLevels = []SyntaxErrorLevel{SyntaxErrorFatal, SyntaxErrorArgument}
+var SyntaxErrorTypes = []SyntaxErrorType{
+<%- errors.each.with_index do |error| -%>
+  <%= error.name %>,
+<%- end -%>
+}
+
+type SyntaxError struct {
+	Message  string
+	Location *Location
+	Level    SyntaxErrorLevel
+  Type     SyntaxErrorType
+}
+
+func NewSyntaxError(
+  message string,
+  location *Location,
+  level SyntaxErrorLevel,
+  errType SyntaxErrorType,
+) *SyntaxError {
+	return &SyntaxError{
+		Message:  message,
+		Location: location,
+		Level:    level,
+    Type:     errType,
+	}
+}

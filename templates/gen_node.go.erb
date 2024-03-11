@@ -1,0 +1,87 @@
+<%- require_relative './utils.rb' -%>
+
+package parser
+
+import (
+  "encoding/json"
+  "math/big"
+)
+
+type NodeVisitor interface {
+  Visit(Node)
+}
+
+type Node interface {
+	Accept(NodeVisitor)
+  Children() []Node
+}
+
+<%- nodes.each do |node| -%>
+type <%= node.name %> struct {
+  <%- node.fields.each do |field| -%>
+  <%- if field.is_a?(Prism::Template::FlagsField) -%>
+  Flags <%= gotype(field) %>;
+  <%- else -%>
+  <%= prop(field) %> <%= gotype(field) %>;
+  <%- end -%>
+  <%- end -%>
+  Loc *Location;
+}
+
+func New<%= node.name %>(<%= (node.fields.map { |field| "#{arg(field)} #{gotype(field)}" } + ["loc *Location"]).join(", ") %>) *<%= node.name %> {
+  return &<%= node.name %>{
+    <%- node.fields.each do |field| -%>
+    <%= prop(field) %>: <%= arg(field) %>,
+    <%- end -%>
+    Loc: loc,
+  }
+}
+
+func (node *<%= node.name %>) Accept(visitor NodeVisitor) {
+  visitor.Visit(node)
+}
+
+<%- if (flags_field = node.fields.find { |field| field.is_a?(Prism::Template::FlagsField) }) -%>
+<%- flag = flags.find { |flag| flag.name == flags_field.kind }.tap { |flag| raise "Expected to find #{field.kind}" unless flag } -%>
+<%- flag.values.each do |value| -%>
+func (node *<%= node.name %>) Is<%= value.camelcase %>() bool {
+  return (node.Flags & <%= const_prefix(flag.name) %>_<%= value.name %>) != 0;
+}
+
+<%- end -%>
+<%- end -%>
+
+func (node *<%= node.name %>) Children() []Node {
+  children := make([]Node, 0)
+
+  <%- node.fields.each do |field| -%>
+  <%- case field -%>
+  <%- when Prism::Template::NodeField -%>
+  children = append(children, node.<%= prop(field) %>);
+
+  <%- when Prism::Template::OptionalNodeField -%>
+  if (node.<%= prop(field) %> != nil) {
+    children = append(children, node.<%= prop(field) %>);
+  }
+
+  <%- when Prism::Template::NodeListField -%>
+  children = append(children, node.<%= prop(field) %>...);
+
+  <%- end -%>
+  <%- end -%>
+  return children
+}
+
+func (node *<%= node.name %>) MarshalJSON() ([]byte, error) {
+ return json.Marshal(map[string]interface{}{
+  "nodeName": "<%= node.name %>",
+  <%- node.fields.each do |field| -%>
+  "<%= arg(field) %>": node.<%= prop(field) %>,
+  <%- end -%>
+  "loc": node.Loc,
+ })
+}
+
+<%- end -%>
+
+
