@@ -1,0 +1,43 @@
+package parser
+
+type ErrorLevel int
+type ErrorType int
+
+const (
+	ErrorFatal ErrorLevel = iota
+	ErrorArgument
+)
+
+const (
+<%- errors.each.with_index do |error, i| -%>
+  <%= error.name %>_ERROR ErrorType = <%= i %>
+<%- end -%>
+)
+
+var ErrorLevels = []ErrorLevel{ErrorFatal, ErrorArgument}
+var ErrorTypes = []ErrorType{
+<%- errors.each.with_index do |error| -%>
+  <%= error.name %>_ERROR,
+<%- end -%>
+}
+
+type Error struct {
+	Message  string
+	Location *Location
+	Level    ErrorLevel
+  Type     ErrorType
+}
+
+func NewError(
+  message string,
+  location *Location,
+  level ErrorLevel,
+  errType ErrorType,
+) *Error {
+	return &Error{
+		Message:  message,
+		Location: location,
+		Level:    level,
+    Type:     errType,
+	}
+}

@@ -3,85 +3,256 @@
 package parser
 
 import (
-  "encoding/json"
-  "math/big"
+	"fmt"
+	"math/big"
+	"reflect"
+	"strings"
 )
 
-type NodeVisitor interface {
-  Visit(Node)
+type Node interface {
+    EndOffset() int
+    HasNewLineFlag() bool
+    SetNewLineFlag(source *Source, newlineMarked []bool)
+    Accept(visitor AbstractNodeVisitor)
+    VisitChildNodes(visitor AbstractNodeVisitor)
+    ChildNodes() []Node
+    String(indent string) string
 }
 
-type Node interface {
-	Accept(NodeVisitor)
-  Children() []Node
+var _ Node = (*BaseNode)(nil)
+
+type BaseNode struct {
+    startOffset  int
+    length      int
+    newLineFlag bool
+}
+
+func NewBaseNode(startOffset, length int) BaseNode {
+    return BaseNode{
+        startOffset: startOffset,
+        length:     length,
+    }
+}
+
+func (n *BaseNode) EndOffset() int {
+    return n.startOffset + n.length
+}
+
+func (n *BaseNode) HasNewLineFlag() bool {
+    return n.newLineFlag
+}
+
+func (n *BaseNode) SetNewLineFlag(source *Source, newlineMarked []bool) {
+    line, err := source.FindLine(n.startOffset)
+    if !newlineMarked[line] {
+        newlineMarked[line] = true
+        n.newLineFlag = err == nil
+    }
+}
+
+func (n *BaseNode) Accept(visitor AbstractNodeVisitor) {
+	visitor.DefaultVisit(n)
+}
+
+func (n *BaseNode) VisitChildNodes(visitor AbstractNodeVisitor) {
+}
+
+func (n *BaseNode) ChildNodes() []Node {
+	return []Node{}
+}
+
+func (n *BaseNode) String(indent string) string {
+	return ""
 }
 
 <%- nodes.each do |node| -%>
-type <%= node.name %> struct {
-  <%- node.fields.each do |field| -%>
-  <%- if field.is_a?(Prism::Template::FlagsField) -%>
-  Flags <%= gotype(field) %>;
-  <%- else -%>
-  <%= prop(field) %> <%= gotype(field) %>;
-  <%- end -%>
-  <%- end -%>
-  Loc *Location;
+var _ Node = (*<%= node.name -%>)(nil)
+
+type <%= node.name -%> struct {
+    BaseNode
+	<%- if node.needs_serialized_length? -%>
+	SerializedLength int
+	<%- end -%>
+	<%- if node.flags -%>
+	Flags int16
+	<%- end -%>
+	<%- node.semantic_fields.each do |field| -%>
+	<%= field.name.pascal_case %> <%= field.go_type %>
+	<%- end -%>
 }
 
-func New<%= node.name %>(<%= (node.fields.map { |field| "#{arg(field)} #{gotype(field)}" } + ["loc *Location"]).join(", ") %>) *<%= node.name %> {
-  return &<%= node.name %>{
-    <%- node.fields.each do |field| -%>
-    <%= prop(field) %>: <%= arg(field) %>,
-    <%- end -%>
-    Loc: loc,
-  }
+<%-
+	params = ["startOffset int", "length int"]
+	params << "serializedLength int" if node.needs_serialized_length?
+	params << "flags int16" if node.flags
+	params.concat(node.semantic_fields.map { |field| "#{field.name.camel_case} #{field.go_type}" })
+-%>
+func New<%= node.name -%>(<%= params.join(", ") %>) *<%= node.name -%> {
+	return &<%= node.name -%>{
+		BaseNode: NewBaseNode(startOffset, length),
+		<%- if node.needs_serialized_length? -%>
+		SerializedLength: serializedLength,
+		<%- end -%>
+		<%- if node.flags -%>
+		Flags: flags,
+		<%- end -%>
+		<%- node.semantic_fields.each do |field| -%>
+		<%= field.name.pascal_case %>: <%= field.name.camel_case %>,
+		<%- end -%>
+	}
 }
 
-func (node *<%= node.name %>) Accept(visitor NodeVisitor) {
-  visitor.Visit(node)
-}
-
-<%- if (flags_field = node.fields.find { |field| field.is_a?(Prism::Template::FlagsField) }) -%>
-<%- flag = flags.find { |flag| flag.name == flags_field.kind }.tap { |flag| raise "Expected to find #{field.kind}" unless flag } -%>
-<%- flag.values.each do |value| -%>
-func (node *<%= node.name %>) Is<%= value.camelcase %>() bool {
-  return (node.Flags & <%= const_prefix(flag.name) %>_<%= value.name %>) != 0;
-}
-
-<%- end -%>
-<%- end -%>
-
-func (node *<%= node.name %>) Children() []Node {
-  children := make([]Node, 0)
-
-  <%- node.fields.each do |field| -%>
-  <%- case field -%>
-  <%- when Prism::Template::NodeField -%>
-  children = append(children, node.<%= prop(field) %>);
-
-  <%- when Prism::Template::OptionalNodeField -%>
-  if (node.<%= prop(field) %> != nil) {
-    children = append(children, node.<%= prop(field) %>);
-  }
-
-  <%- when Prism::Template::NodeListField -%>
-  children = append(children, node.<%= prop(field) %>...);
-
-  <%- end -%>
-  <%- end -%>
-  return children
-}
-
-func (node *<%= node.name %>) MarshalJSON() ([]byte, error) {
- return json.Marshal(map[string]interface{}{
-  "nodeName": "<%= node.name %>",
-  <%- node.fields.each do |field| -%>
-  "<%= arg(field) %>": node.<%= prop(field) %>,
-  <%- end -%>
-  "loc": node.Loc,
- })
+<%- if (node_flags = node.flags) -%>
+<%- node_flags.values.each do |value| -%>
+func (n *<%= node.name -%>) Is<%= value.camelcase %>() bool {
+	return is<%= node_flags.name.pascal_case %><%= value.camelcase %>(n.Flags)
 }
 
 <%- end -%>
+<%- end -%>
 
+<%- if node.newline == false -%>
+func (n *<%= node.name -%>) SetNewLineFlag(source *Source, newlineMarked []bool) {
+	// Never mark <%= node.name %> with a newline flag, mark children instead
+}
+<%- elsif node.newline.is_a?(String) -%>
+func (n *<%= node.name -%>) SetNewLineFlag(source *Source, newlineMarked []bool) {
+	<%- field = node.semantic_fields.find { |f| f.name == node.newline } or raise node.newline -%>
+	<%- case field -%>
+	<%- when Prism::Template::NodeField -%>
+	n.<%= field.name.pascal_case %>.SetNewLineFlag(source, newlineMarked)
+	<%- when Prism::Template::NodeListField -%>
+	var first Node
+	if len(n.<%= field.name.pascal_case %>) > 0 {
+	first = n.<%= field.name.pascal_case %>[0]
+	} else {
+		first = nil
+	}
 
+	if first != nil {
+		first.SetNewLineFlag(source, newlineMarked)
+	}
+	<%- else raise field.class.name -%>
+	<%- end -%>
+}
+<%- end -%>
+
+func (n *<%= node.name -%>) VisitChildNodes(visitor AbstractNodeVisitor) {
+	<%- node.semantic_fields.each do |field| -%>
+	<%- case field -%>
+	<%- when Prism::Template::NodeListField -%>
+	for _, child := range n.<%= field.name.pascal_case %> {
+		child.Accept(visitor)
+	}
+	<%- when Prism::Template::NodeField -%>
+	n.<%= field.name.pascal_case %>.Accept(visitor)
+	<%- when Prism::Template::OptionalNodeField -%>
+	if (n.<%= field.name.pascal_case %> != nil) {
+		n.<%= field.name.pascal_case %>.Accept(visitor)
+	}
+	<%- end -%>
+	<%- end -%>
+}
+
+func (n *<%= node.name -%>) ChildNodes() []Node {
+	<%- if node.semantic_fields.none?(Prism::Template::NodeListField) and node.semantic_fields.none?(Prism::Template::NodeKindField) -%>
+	return []Node{}
+	<%- elsif node.semantic_fields.one?(Prism::Template::NodeListField) and node.semantic_fields.none?(Prism::Template::NodeKindField) -%>
+	return n.<%= node.semantic_fields.grep(Prism::Template::NodeListField).first.name.pascal_case %>
+	<%- elsif node.semantic_fields.none?(Prism::Template::NodeListField) -%>
+	return []Node { <%= node.semantic_fields.grep(Prism::Template::NodeKindField).map { |field| "n.#{field.name.pascal_case}" }.join(', ') %> }
+	<%- else -%>
+	childNodes := make([]Node, 0)
+	<%- node.semantic_fields.each do |field| -%>
+		<%- case field -%>
+		<%- when Prism::Template::NodeField, Prism::Template::OptionalNodeField -%>
+	childNodes = append(childNodes, n.<%= field.name.pascal_case %>)
+		<%- when Prism::Template::NodeListField -%>
+	for _, child := range n.<%= field.name.pascal_case %> {
+		childNodes = append(childNodes, child)
+	}
+		<%- end -%>
+	<%- end -%>
+	return childNodes
+	<%- end -%>
+}
+
+func (n *<%= node.name -%>) Accept(visitor AbstractNodeVisitor) {
+	visitor.DefaultVisit(n)
+}
+
+func (n *<%= node.name -%>) String(indent string) string {
+	var builder strings.Builder
+	builder.WriteString(reflect.TypeOf(*n).Name())
+	if n.HasNewLineFlag() {
+		builder.WriteString("[Li]")
+	}
+	builder.WriteString("\n")
+	<%- if node.fields.any?(Prism::Template::NodeListField) or node.fields.any?(Prism::Template::ConstantListField) -%>
+	nextNextIndent := indent + "  " + "  "
+	<%- end -%>
+	<%- [*node.flags, *node.fields.grep_v(Prism::Template::LocationField).grep_v(Prism::Template::OptionalLocationField)].each do |field| -%>
+	builder.WriteString(indent + "  ")
+	builder.WriteString("<%= field.name.pascal_case %>: ")
+	<%- case field -%>
+	<%- when Prism::Template::NodeField -%>
+	builder.WriteString(n.<%= field.name.pascal_case %>.String(indent + "  "))
+	<%- when Prism::Template::OptionalNodeField -%>
+	if n.<%= field.name.pascal_case %> == nil {
+		builder.WriteString("nil\n")
+	} else {
+		builder.WriteString(n.<%= field.name.pascal_case %>.String(indent + "  "))
+	}
+	<%- when Prism::Template::NodeListField -%>
+	builder.WriteString("\n")
+	for _, child := range n.<%= field.name.pascal_case %> {
+		builder.WriteString(nextNextIndent)
+		builder.WriteString(child.String(nextNextIndent))
+	}
+	<%- when Prism::Template::StringField -%>
+	builder.WriteString("\"")
+	builder.WriteString(fmt.Sprint(n.<%= field.name.pascal_case %>))
+	builder.WriteString("\"")
+	builder.WriteString("\n")
+	<%- when Prism::Template::ConstantField -%>
+	builder.WriteString("\"")
+	builder.WriteString(fmt.Sprint(n.<%= field.name.pascal_case %>))
+	builder.WriteString("\"")
+	builder.WriteString("\n")
+	<%- when Prism::Template::OptionalConstantField -%>
+	if n.<%= field.name.pascal_case %> == nil {
+		builder.WriteString("nil")
+	} else {
+		builder.WriteString("\"")
+		builder.WriteString(fmt.Sprint(n.<%= field.name.pascal_case %>))
+		builder.WriteString("\"")
+	}
+	builder.WriteString("\n")
+	<%- when Prism::Template::ConstantListField -%>
+	builder.WriteString("\n")
+	for _, constant := range n.<%= field.name.pascal_case %> {
+		builder.WriteString(nextNextIndent)
+		builder.WriteString("\"")
+		builder.WriteString(constant)
+		builder.WriteString("\"")
+		builder.WriteString("\n")
+	}
+	<%- when Prism::Template::Flags -%>
+	builder.WriteString(fmt.Sprintf("%x", n.Flags))
+	builder.WriteString("\n")
+	<%- when Prism::Template::UInt8Field -%>
+	builder.WriteString(fmt.Sprint(n.<%= field.name.pascal_case %>))
+	<%- when Prism::Template::UInt32Field -%>
+	builder.WriteString(fmt.Sprint(n.<%= field.name.pascal_case %>))
+	<%- when Prism::Template::IntegerField -%>
+	builder.WriteString(fmt.Sprint(n.<%= field.name.pascal_case %>))
+	<%- when Prism::Template::DoubleField -%>
+	builder.WriteString(fmt.Sprint(n.<%= field.name.pascal_case %>))
+	builder.WriteString("\n")
+	<%- else -%>
+	<%- raise field.class.name -%>
+	<%- end -%>
+	<%- end -%>
+	return builder.String()
+}
+<%- end %>

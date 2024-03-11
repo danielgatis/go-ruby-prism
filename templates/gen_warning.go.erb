@@ -1,0 +1,43 @@
+package parser
+
+type WarningLevel int
+type WarningType int
+
+const (
+	WarningDefault WarningLevel = iota
+	WarningVerbose
+)
+
+const (
+<%- warnings.each.with_index do |warning, i| -%>
+  <%= warning.name %>_WARNING WarningType = <%= i %>
+<%- end -%>
+)
+
+var WarningLevels = []WarningLevel{WarningDefault, WarningVerbose}
+var WarningTypes = []WarningType{
+<%- warnings.each.with_index do |warning| -%>
+  <%= warning.name %>_WARNING,
+<%- end -%>
+}
+
+type Warning struct {
+	Message  string
+	Location *Location
+	Level    WarningLevel
+  Type     WarningType
+}
+
+func NewWarning(
+  message string,
+  location *Location,
+  level WarningLevel,
+  warnType WarningType,
+) *Warning {
+	return &Warning{
+		Message:  message,
+		Location: location,
+		Level:    level,
+    Type:     warnType,
+	}
+}

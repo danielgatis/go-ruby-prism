@@ -24,4 +24,4 @@ go.work
 tmp/
 
 # fixtures
-**/test/fixtures/**/*
+test/fixtures/**/*
