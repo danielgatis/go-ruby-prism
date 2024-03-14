@@ -8,7 +8,7 @@ The go-ruby-prism is package that leverages the Ruby Prism parser compiled to We
 
 ## Features
 
-- **CGO-Free**: Go-Ruby-Prism utilizes the Ruby Prism parser compiled to WebAssembly, eliminating the need for CGO bindings.
+- **CGO-Free**: Go-Ruby-Prism utilizes the [Ruby Prism parser](https://github.com/ruby/prism) compiled to WebAssembly, eliminating the need for CGO bindings.
 - **Simplified Integration**: Seamlessly integrate Ruby code parsing into your Go applications with minimal setup.
 - **High Performance**: Harnesses the efficiency of WebAssembly for speedy and efficient parsing of Ruby code.
 - **Cross-Platform**: Works across various platforms supported by Go, ensuring compatibility in diverse environments.
