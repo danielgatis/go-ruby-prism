@@ -22,3 +22,6 @@ go.work
 
 # Temp dir
 tmp/
+
+# fixtures
+**/test/fixtures/**/*
