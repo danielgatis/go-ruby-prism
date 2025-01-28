@@ -1,16 +1,15 @@
+<%- require_relative './utils.rb' -%>
+
 package parser
 
-<%-
-const_prefix = lambda { |name| name.gsub("Flags", "").gsub(/([a-z])([A-Z])/, '\1_\2').upcase }
--%>
-
 <%- flags.each do |flag| -%>
-type <%= flag.name %> int16
-
-const (
 <%- flag.values.each_with_index do |value, index| -%>
-  <%= const_prefix.call(flag.name) %>_<%= value.name %> <%= flag.name %> = 1 << <%= index %>
+const <%= flag.name.snake_case.upcase %>_<%= value.name %> int16 = 1 << <%= index + Prism::Template::COMMON_FLAGS_COUNT %>
 <%- end -%>
-)
 
+<%- flag.values.each do |value| -%>
+func is<%= flag.name.pascal_case %><%= value.camelcase %>(flags int16) bool {
+	return (flags & <%= flag.name.snake_case.upcase %>_<%= value.name %>) != 0
+}
+<%- end -%>
 <%- end -%>

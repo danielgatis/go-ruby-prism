@@ -3,17 +3,22 @@ ROOT_SOURCE_DIR := .
 
 .PHONY: all
 
-all: copy_config copy_template generate
+all: init_submodules wasm_build generate format
 
-copy_config:
-		@echo "Copying config.yml"
-		@cp $(PRISM_SOURCE_DIR)/config.yml $(ROOT_SOURCE_DIR)/config.yml
-
-copy_template:
-		@echo "Copying template.rb"
-		@cp $(PRISM_SOURCE_DIR)/templates/template.rb $(ROOT_SOURCE_DIR)/templates/template.rb
+init_submodules:
+		@echo "Initializing submodules"
+		git submodule update --init --recursive
 
 generate:
 		@echo "Generating go files"
-		@go generate ./...
-		@go fmt ./...
+		go generate ./...
+
+format:
+		@echo "Formatting go files"
+		go fmt ./...
+
+wasm_build:
+		@echo "Building wasm"
+		rm -fr prism/java-wasm/src/test/resources/prism.wasm
+		cd $(PRISM_SOURCE_DIR) && make java-wasm
+		cp -f prism/java-wasm/src/test/resources/prism.wasm wasm

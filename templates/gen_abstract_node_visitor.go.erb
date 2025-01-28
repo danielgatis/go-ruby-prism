@@ -1,0 +1,21 @@
+package parser
+
+type AbstractNodeVisitor interface {
+	DefaultVisit(node Node)
+
+	<%- nodes.each do |node| -%>
+	visit<%= node.name -%>(node *<%= node.name -%>)
+
+	<%- end -%>
+}
+
+type BaseAbstractNodeVisitor struct {}
+
+func (v *BaseAbstractNodeVisitor) DefaultVisit(node Node) {}
+
+<%- nodes.each do |node| -%>
+func (v *BaseAbstractNodeVisitor) visit<%= node.name -%>(node *<%= node.name -%>) {
+	v.DefaultVisit(node)
+}
+
+<%- end -%>

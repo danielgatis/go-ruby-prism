@@ -3,8 +3,8 @@ package wasm
 import (
 	"context"
 	_ "embed"
+	"fmt"
 
-	"github.com/rotisserie/eris"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -40,7 +40,7 @@ func NewModFunc(mod api.Module, name string) *ModFunc {
 func (f *ModFunc) Call(ctx context.Context, params ...uint64) (uint64, error) {
 	result, err := f.fn.Call(ctx, params...)
 	if err != nil {
-		return 0, eris.Wrap(err, "failed to call the wasm func")
+		return 0, fmt.Errorf("failed to call the wasm func: %w", err)
 	}
 
 	if len(result) > 0 {
@@ -69,7 +69,7 @@ func NewRuntime(ctx context.Context) (*Runtime, error) {
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
 	mod, err := runtime.Instantiate(ctx, prismWasm)
 	if err != nil {
-		return nil, eris.Wrap(err, "failed to instantiate prism")
+		return nil, fmt.Errorf("failed to instantiate prism: %w", err)
 	}
 
 	return &Runtime{
@@ -88,7 +88,7 @@ func NewRuntime(ctx context.Context) (*Runtime, error) {
 
 func (r *Runtime) Close(ctx context.Context) error {
 	if err := r.runtime.Close(ctx); err != nil {
-		return eris.Wrap(err, "failed to close the runtime")
+		return fmt.Errorf("failed to close the runtime: %w", err)
 	}
 
 	return nil
@@ -100,7 +100,7 @@ func (r *Runtime) Calloc(ctx context.Context, size uint64, count uint64) (uint64
 
 func (r *Runtime) Free(ctx context.Context, ptr uint64) error {
 	_, err := r.modFree.Call(ctx, ptr)
-	return err
+	return fmt.Errorf("failed to free the memory: %w", err)
 }
 
 func (r *Runtime) BufferSizeOf(ctx context.Context) (uint64, error) {
@@ -109,7 +109,11 @@ func (r *Runtime) BufferSizeOf(ctx context.Context) (uint64, error) {
 
 func (r *Runtime) BufferInit(ctx context.Context, bufferPtr uint64) error {
 	_, err := r.modPmBufferInit.Call(ctx, bufferPtr)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to init the buffer: %w", err)
+	}
+
+	return nil
 }
 
 func (r *Runtime) BufferValue(ctx context.Context, bufferPtr uint64) (uint64, error) {
@@ -122,7 +126,11 @@ func (r *Runtime) BufferLength(ctx context.Context, bufferPtr uint64) (uint64, e
 
 func (r *Runtime) BufferFree(ctx context.Context, bufferPtr uint64) error {
 	_, err := r.modPmBufferFree.Call(ctx, bufferPtr)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to free the buffer: %w", err)
+	}
+
+	return nil
 }
 
 func (r *Runtime) SerializeParse(ctx context.Context, bufferPtr, sourcePtr, sourceLen, optPtr uint64) (uint64, error) {

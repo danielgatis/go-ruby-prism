@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -112,7 +113,11 @@ func unzip(src, dest string) error {
 		}
 
 		if file.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
+			err := os.MkdirAll(fpath, os.ModePerm)
+			if err != nil {
+				fmt.Println(err)
+			}
+
 			continue
 		}
 
@@ -160,17 +165,16 @@ func iterateRubyFiles(dir string) error {
 				os.Exit(1)
 			}
 
-			_, err = p.Parse(ctx, string(source))
+			result, err := p.Parse(ctx, source)
 			if err != nil {
 				fmt.Println(err)
-				fmt.Println("Ruby file with error:", path)
 				os.Exit(1)
 			}
 
+			jsonResult, _ := json.MarshalIndent(result, "", "  ")
 			fmt.Println("Ruby file found:", path)
-			if err == nil {
-				fmt.Println("Ruby file parsed:", path)
-			}
+			fmt.Println("Ruby parse result:", string(jsonResult))
+			fmt.Println("--")
 		}
 		return nil
 	})

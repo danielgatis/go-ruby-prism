@@ -1,19 +1,186 @@
 package parser
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"math"
 	"math/big"
-
-	"github.com/rotisserie/eris"
+	"strings"
 )
 
-func loadVarUInt(buff *buffer) (uint32, error) {
+const prismHeader = "PRISM"
+const majorVersion = 1
+const minorVersion = 3
+const patchVersion = 0
+
+func load(serialized []byte, source []byte) (*ParseResult, error) {
+	buff := NewSeekableBuffer(serialized)
+	src := NewSource(source)
+
+	// check header
+	header := make([]byte, 5)
+	_, err := buff.Read(header)
+	if err != nil {
+		return nil, fmt.Errorf("error reading header: %w", err)
+	}
+
+	if !bytes.Equal(header, []byte(prismHeader)) {
+		return nil, fmt.Errorf("invalid prism header")
+	}
+
+	// check version
+	version := make([]byte, 3)
+	_, err = buff.Read(version)
+	if err != nil {
+		return nil, fmt.Errorf("error reading version: %w", err)
+	}
+
+	if !bytes.Equal(version, []byte{majorVersion, minorVersion, patchVersion}) {
+		return nil, fmt.Errorf("invalid version number")
+	}
+
+	// check location
+	var location = make([]byte, 1)
+	_, err = buff.Read(location)
+	if err != nil {
+		return nil, fmt.Errorf("error reading location: %w", err)
+	}
+
+	if !bytes.Equal(location, []byte{0}) {
+		return nil, fmt.Errorf("requires no location fields in the serialized output")
+	}
+
+	// load the encoding
+	encodingLength, err := loadVarUInt(buff)
+	if err != nil {
+		return nil, fmt.Errorf("error reading encoding length: %w", err)
+	}
+
+	encodingNameBytes := make([]byte, encodingLength)
+	if _, err := buff.Read(encodingNameBytes); err != nil {
+		return nil, fmt.Errorf("error reading encoding name: %w", err)
+	}
+
+	encodingName := string(encodingNameBytes)
+	encodingCharset := getEncodingCharset(encodingName)
+
+	// load the source start line
+	startLine, err := loadVarSInt(buff)
+	if err != nil {
+		return nil, fmt.Errorf("error reading start line: %w", err)
+	}
+
+	src.SetStartLine(startLine)
+
+	// load the source line offsets
+	lineOffsets, err := loadLineOffsets(buff)
+	if err != nil {
+		return nil, fmt.Errorf("error reading line offsets: %w", err)
+	}
+
+	src.SetLineOffsets(lineOffsets)
+
+	// load the comments
+	comments, err := loadComments(buff)
+	if err != nil {
+		return nil, fmt.Errorf("error reading comments: %w", err)
+	}
+
+	// load the magic comments
+	magicComments, err := loadMagicComments(buff)
+	if err != nil {
+		return nil, fmt.Errorf("error reading magic comments: %w", err)
+	}
+
+	// load the data location
+	dataLocation, err := loadOptionalLocation(buff)
+	if err != nil {
+		return nil, fmt.Errorf("error reading data location: %w", err)
+	}
+
+	// load errors
+	errors, err := loadErrors(buff)
+	if err != nil {
+		return nil, fmt.Errorf("error reading errors: %w", err)
+	}
+
+	// load warnings
+	warnings, err := loadWarnings(buff)
+	if err != nil {
+		return nil, fmt.Errorf("error reading warnings: %w", err)
+	}
+
+	// load constant pool
+	constantPool, err := loadConstantPool(buff, source, encodingCharset)
+	if err != nil {
+		return nil, fmt.Errorf("error reading constant pool: %w", err)
+	}
+
+	// load nodes
+	var node Node
+
+	if len(errors) == 0 {
+		n, err := loadNode(buff, source, constantPool)
+		if err != nil {
+			return nil, fmt.Errorf("error reading node: %w", err)
+		}
+		node = n
+
+		left := constantPool.BufferOffset - buff.Position()
+		if left != 0 {
+			return nil, fmt.Errorf(
+				"expected to consume all bytes while deserializing but there were %d bytes left",
+				left,
+			)
+		}
+
+		newlineMarked := make([]bool, 1+src.LineCount())
+		visitor := NewMarkNewlinesVisitor(src, newlineMarked)
+		node.Accept(visitor)
+	}
+
+	return NewParseResult(node, comments, magicComments, dataLocation, errors, warnings, src), nil
+}
+
+func getEncodingCharset(encodingName string) string {
+	encodingName = strings.ToLower(encodingName)
+	if encodingName == "ascii-8bit" {
+		return "US-ASCII"
+	}
+
+	return encodingName
+}
+
+func bytesToName(bytes []byte, encodingCharset string) (string, error) {
+	// Convert bytes to a string using the specified encoding
+	str, err := decodeBytesToString(bytes, encodingCharset)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode bytes: %w", err)
+	}
+
+	// Return the interned string (Go does not have direct intern support like Java)
+	return str, nil
+}
+
+// decodeBytesToString decodes bytes into a string using the specified encoding
+func decodeBytesToString(bytes []byte, encodingCharset string) (string, error) {
+	// Example for UTF-8. For other encodings, you may need to use external libraries.
+	if encodingCharset == "UTF-8" || encodingCharset == "utf-8" {
+		return string(bytes), nil
+	}
+	return "", fmt.Errorf("unsupported encoding: %s", encodingCharset)
+}
+
+// variable-length encoding
+func loadVarUInt(buff *SeekableBuffer) (int, error) {
 	result := uint32(0)
 	shift := 0
 
 	for {
-		byte, err := buff.readByte()
+		byte, err := buff.ReadByte()
 		if err != nil {
-			return 0, eris.Wrap(err, "error reading byte")
+			return 0, fmt.Errorf("failed to read byte: %w", err)
 		}
 
 		result += uint32(byte&0x7F) << shift
@@ -24,53 +191,91 @@ func loadVarUInt(buff *buffer) (uint32, error) {
 		}
 	}
 
-	return result, nil
+	return int(result), nil
 }
 
-func loadVarSInt(buff *buffer) (int32, error) {
+func loadVarSInt(buff *SeekableBuffer) (int, error) {
+	// Decode the unsigned varint first
 	x, err := loadVarUInt(buff)
 	if err != nil {
-		return 0, eris.Wrap(err, "error reading VarUInt")
+		return 0, err
 	}
 
-	return int32((x >> 1) ^ (-(x & 1))), nil
+	// Perform the ZigZag decoding
+	return (x >> 1) ^ -(x & 1), nil
 }
 
-func loadLineOffsets(buff *buffer) ([]uint32, error) {
-	count, err := loadVarUInt(buff)
+func loadInt(buff *SeekableBuffer) (int, error) {
+	data := make([]byte, 4)
+	_, err := buff.Read(data)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading line offsets count")
+		return 0, fmt.Errorf("failed to read int: %w", err)
 	}
 
-	lineOffsets := make([]uint32, count)
-	for i := range count {
-		lineOffsets[i], err = loadVarUInt(buff)
+	value := int32(data[0])<<24 | int32(data[1])<<16 | int32(data[2])<<8 | int32(data[3])
+	return int(value), nil
+}
+
+func loadLineOffsets(buff *SeekableBuffer) ([]int, error) {
+	// Decode the count of line offsets
+	count, err := loadVarUInt(buff)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read count: %w", err)
+	}
+
+	// Initialize a slice to hold the line offsets
+	lineOffsets := make([]int, count)
+
+	// Read each line offset
+	for i := 0; i < count; i++ {
+		lineOffset, err := loadVarUInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading line offset")
+			return nil, fmt.Errorf("failed to read line offset at index %d: %w", i, err)
 		}
+		lineOffsets[i] = lineOffset
 	}
 
 	return lineOffsets, nil
 }
 
-func loadLocation(buff *buffer) (*Location, error) {
+func loadLocation(buff *SeekableBuffer) (*Location, error) {
+	// Decode the start offset
 	startOffset, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading location startOffset")
+		return nil, fmt.Errorf("failed to read the start offset: %w", err)
 	}
 
+	// Decode the length
 	length, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading location length")
+		return nil, fmt.Errorf("failed to read the length: %w", err)
 	}
 
 	return NewLocation(startOffset, length), nil
 }
 
-func loadComments(buff *buffer) ([]*Comment, error) {
+func loadOptionalLocation(buff *SeekableBuffer) (*Location, error) {
+	isPresent, err := buff.ReadByte()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read byte: %w", err)
+	}
+
+	if isPresent != 0 {
+		location, err := loadLocation(buff)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read location: %w", err)
+		}
+
+		return location, nil
+	}
+
+	return nil, nil
+}
+
+func loadComments(buff *SeekableBuffer) ([]*Comment, error) {
 	count, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading comments count")
+		return nil, fmt.Errorf("failed to read count: %w", err)
 	}
 
 	comments := make([]*Comment, count)
@@ -78,12 +283,12 @@ func loadComments(buff *buffer) ([]*Comment, error) {
 	for i := range count {
 		typpe, err := loadVarUInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading comment type")
+			return nil, fmt.Errorf("failed to read comment type at index %d: %w", i, err)
 		}
 
 		loc, err := loadLocation(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading comment value location")
+			return nil, fmt.Errorf("failed to read location at index %d: %w", i, err)
 		}
 
 		comment := NewComment(typpe, loc)
@@ -93,213 +298,247 @@ func loadComments(buff *buffer) ([]*Comment, error) {
 	return comments, nil
 }
 
-func loadMagicComments(buff *buffer) ([]*MagicComment, error) {
+func loadMagicComments(buff *SeekableBuffer) ([]*MagicComment, error) {
+	// Decode the count of magic comments
 	count, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading magic comments count")
+		return nil, fmt.Errorf("failed to read count: %w", err)
 	}
 
-	comments := make([]*MagicComment, count)
+	magicComments := make([]*MagicComment, count)
 
-	for i := range count {
+	// Read each magic comment
+	for i := 0; i < count; i++ {
 		keyLocation, err := loadLocation(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading magic comment key location")
+			return nil, fmt.Errorf("failed to read key location at index %d: %w", i, err)
 		}
 
 		valueLocation, err := loadLocation(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading magic comment value location")
+			return nil, fmt.Errorf("failed to read value location at index %d: %w", i, err)
 		}
 
-		comment := NewMagicComment(keyLocation, valueLocation)
-		comments[i] = comment
+		// Create a MagicComment and add it to the slice
+		magicComments[i] = NewMagicComment(keyLocation, valueLocation)
 	}
 
-	return comments, nil
+	return magicComments, nil
 }
 
-func loadOptionalLocation(buff *buffer) (*Location, error) {
-	nextByte, err := buff.readByte()
-	if err != nil {
-		return nil, eris.Wrap(err, "error reading optional location")
-	}
-
-	if nextByte == 0 {
-		return nil, nil
-	}
-
-	location, err := loadLocation(buff)
-	if err != nil {
-		return nil, eris.Wrap(err, "error reading location")
-	}
-
-	return location, nil
-}
-
-func loadSynErrors(buff *buffer) ([]*SyntaxError, error) {
+func loadErrors(buff *SeekableBuffer) ([]*Error, error) {
 	count, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading errors count")
+		return nil, fmt.Errorf("failed to read count: %w", err)
 	}
 
-	synErrs := make([]*SyntaxError, count)
-	for i := range count {
-		errorType, err := buff.readByte()
+	errors := make([]*Error, count)
+
+	for i := 0; i < count; i++ {
+		errType, err := loadVarUInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading error type")
+			return nil, fmt.Errorf("failed to read error type at index %d: %w", i, err)
 		}
 
-		messageBytes, err := loadEmbeddedStr(buff)
+		message, err := loadEmbeddedString(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading error message")
+			return nil, fmt.Errorf("failed to read error message at index %d: %w", i, err)
 		}
 
 		location, err := loadLocation(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading error location")
+			return nil, fmt.Errorf("failed to read location at index %d: %w", i, err)
 		}
 
-		errorLevel, err := buff.readByte()
+		level, err := loadInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading error level")
+			return nil, fmt.Errorf("failed to read error level at index %d: %w", i, err)
 		}
 
-		synErrs[i] = NewSyntaxError(
-			string(messageBytes),
-			location,
-			SyntaxErrorLevel(errorLevel),
-			SyntaxErrorTypes[(errorType&0xFF)],
-		)
+		errors[i] = NewError(string(message), location, ErrorLevel(level), ErrorType(errType))
 	}
 
-	return synErrs, nil
+	return errors, nil
 }
 
-func loadSynWarnings(buff *buffer) ([]*SyntaxWarning, error) {
+func loadWarnings(buff *SeekableBuffer) ([]*Warning, error) {
 	count, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading warnings count")
+		return nil, fmt.Errorf("failed to read count: %w", err)
 	}
 
-	synWarnings := make([]*SyntaxWarning, count)
-	for i := range count {
-		warningType, err := buff.readByte()
+	warnings := make([]*Warning, count)
+
+	for i := 0; i < count; i++ {
+		warningType, err := loadVarUInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading warning type")
+			return nil, fmt.Errorf("failed to read warning type at index %d: %w", i, err)
 		}
 
-		messageBytes, err := loadEmbeddedStr(buff)
+		message, err := loadEmbeddedString(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading warning message")
+			return nil, fmt.Errorf("failed to read warning message at index %d: %w", i, err)
 		}
 
 		location, err := loadLocation(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading warning location")
+			return nil, fmt.Errorf("failed to read location at index %d: %w", i, err)
 		}
 
-		warningLevel, err := buff.readByte()
+		level, err := loadInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading warning level")
+			return nil, fmt.Errorf("failed to read warning level at index %d: %w", i, err)
 		}
 
-		synWarnings[i] = NewSyntaxWarning(
-			string(messageBytes),
-			location,
-			SyntaxWarningLevel(warningLevel),
-			SyntaxWarningTypes[(warningType&0xFF)-224],
-		)
+		warnings[i] = NewWarning(string(message), location, WarningLevel(level), WarningType(warningType-289))
 	}
 
-	return synWarnings, nil
+	return warnings, nil
 }
 
-func loadEmbeddedStr(buff *buffer) ([]byte, error) {
+func loadConstantPool(buff *SeekableBuffer, source []byte, encodingCharset string) (*ConstantPool, error) {
+	constantPoolBufferOffset, err := loadInt(buff)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read constant pool buff offset: %w", err)
+	}
+
+	constantPoolLength, err := loadVarUInt(buff)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read constant pool length: %w", err)
+	}
+
+	return NewConstantPool(source, constantPoolBufferOffset, constantPoolLength, encodingCharset), nil
+}
+
+func loadEmbeddedString(buff *SeekableBuffer) ([]byte, error) {
 	length, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading embedded string length")
+		return nil, fmt.Errorf("error reading embedded string length: %w", err)
 	}
 
 	strBytes := make([]byte, length)
-	_, err = buff.read(strBytes)
+	_, err = buff.Read(strBytes)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading embedded string")
+		return nil, fmt.Errorf("error reading embedded string bytes: %w", err)
 	}
 
 	return strBytes, nil
 }
 
-func loadStr(buff *buffer, src []byte) ([]byte, error) {
-	b, err := buff.readByte()
+func loadString(buff *SeekableBuffer, src []byte) (string, error) {
+	b, err := buff.ReadByte()
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading string type")
+		return "", fmt.Errorf("error reading string type: %w", err)
 	}
 
 	switch b {
 	case 1:
 		start, err := loadVarUInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading string start")
+			return "", fmt.Errorf("error reading string start: %w", err)
 		}
 
 		length, err := loadVarUInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading string length")
+			return "", fmt.Errorf("error reading string length: %w", err)
 		}
 
 		bytes := make([]byte, length)
 		copy(bytes, src[start:start+length])
-		return bytes, nil
+		return string(bytes), nil
 	case 2:
-		strBytes, err := loadEmbeddedStr(buff)
+		strBytes, err := loadEmbeddedString(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading embedded string")
+			return "", fmt.Errorf("error reading embedded string: %w", err)
 		}
 
-		return strBytes, nil
+		return string(strBytes), nil
 	default:
-		return nil, eris.Wrapf(err, "invalid string type: %d", b)
+		return "", fmt.Errorf("invalid string type: %d", b)
 	}
 }
 
-func loadOptionalNode(buff *buffer, src []byte, pool *constantPool) (Node, error) {
-	nextByte, err := buff.readByte()
+func loadFlags(buff *SeekableBuffer) (int16, error) {
+	flags, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading optional node")
+		return 0, fmt.Errorf("failed to read flags: %w", err)
+	}
+	if flags < 0 || flags > 32767 {
+		return 0, fmt.Errorf("flags out of range: %d", flags)
+	}
+	return int16(flags), nil
+}
+
+func loadConstant(buff *SeekableBuffer, constantPool *ConstantPool) (string, error) {
+	idx, err := loadVarUInt(buff)
+	if err != nil {
+		return "", fmt.Errorf("failed to read constant index: %w", err)
 	}
 
-	if nextByte == 0 {
+	constant, err := constantPool.Get(buff, idx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get constant: %w", err)
+	}
+
+	return constant, nil
+}
+
+func loadOptionalConstant(buff *SeekableBuffer, constantPool *ConstantPool) (*string, error) {
+	if buff.Get(buff.Position()) != 0 {
+		str, err := loadConstant(buff, constantPool)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read constant: %w", err)
+		}
+
+		return &str, nil
+	} else {
+		buff.Seek(1)
 		return nil, nil
 	}
-
-	buff.setPosition(buff.position() - 1)
-	node, err := loadNode(buff, src, pool)
-	if err != nil {
-		return nil, eris.Wrap(err, "error reading node")
-	}
-
-	return node, nil
 }
 
-func loadInteger(buff *buffer) (*big.Int, error) {
-	negative, err := buff.readByte()
+func loadConstants(buff *SeekableBuffer, constantPool *ConstantPool) ([]string, error) {
+	length, err := loadVarUInt(buff)
+
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading integer sign")
+		return nil, fmt.Errorf("failed to read constants length: %w", err)
+	}
+
+	if length == 0 {
+		return []string{}, nil
+	}
+
+	constants := make([]string, length)
+
+	for i := 0; i < length; i++ {
+		constant, err := loadConstant(buff, constantPool)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read constant at index %d: %w", i, err)
+		}
+		constants[i] = constant
+	}
+
+	return constants, nil
+}
+
+func loadInteger(buff *SeekableBuffer) (*big.Int, error) {
+	negative, err := buff.ReadByte()
+	if err != nil {
+		return nil, fmt.Errorf("error reading integer sign: %w", err)
 	}
 
 	length, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading integer words length")
+		return nil, fmt.Errorf("error reading integer words length: %w", err)
 	}
 
 	if length == 0 {
-		return nil, eris.Wrapf(err, "invalid integer words length: %d", length)
+		return nil, fmt.Errorf("invalid integer length: %d", length)
 	}
 
 	firstWord, err := loadVarUInt(buff)
 	if err != nil {
-		return nil, eris.Wrap(err, "error reading integer first word")
+		return nil, fmt.Errorf("error reading first word: %w", err)
 	}
 
 	if length == 1 {
@@ -314,7 +553,7 @@ func loadInteger(buff *buffer) (*big.Int, error) {
 	for index := 1; index < int(length); index++ {
 		word, err := loadVarUInt(buff)
 		if err != nil {
-			return nil, eris.Wrap(err, "error reading word")
+			return nil, fmt.Errorf("error reading word: %w", err)
 		}
 
 		temp := big.NewInt(int64(word))
@@ -331,65 +570,32 @@ func loadInteger(buff *buffer) (*big.Int, error) {
 	return result, nil
 }
 
-func loadConstant(buff *buffer, pool *constantPool) (string, error) {
-	idx, err := loadVarUInt(buff)
-	if err != nil {
-		return "", eris.Wrap(err, "error reading constant index")
+func loadDouble(buff *SeekableBuffer) (float64, error) {
+	if len(buff.Bytes()) == 0 {
+		return 0, fmt.Errorf("buffer is empty")
 	}
 
-	constant, err := pool.Get(buff, idx)
-	if err != nil {
-		return "", eris.Wrap(err, "error getting constant")
-	}
+	data := buff.Bytes()
+	bytes := data[buff.Position() : buff.Position()+8]
+	buff.Seek(8)
 
-	return constant, nil
+	bits := binary.LittleEndian.Uint64(bytes)
+	float := math.Float64frombits(bits)
+
+	return float, nil
 }
 
-func loadOptionalConstant(buff *buffer, pool *constantPool) (*string, error) {
-	nextByte, err := buff.readByte()
-	if err != nil {
-		return nil, eris.Wrap(err, "error reading optional node")
-	}
+func loadOptionalNode(buff *SeekableBuffer, source []byte, constantPool *ConstantPool) (Node, error) {
+	if buff.Get(buff.Position()) != 0 {
+		node, err := loadNode(buff, source, constantPool)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load node: %w", err)
 
-	if nextByte == 0 {
+		}
+
+		return node, nil
+	} else {
+		buff.Seek(1)
 		return nil, nil
 	}
-
-	buff.setPosition(buff.position() - 1)
-	constant, err := loadConstant(buff, pool)
-	if err != nil {
-		return nil, eris.Wrap(err, "error reading node")
-	}
-
-	return &constant, nil
-}
-
-func loadConstants(buff *buffer, pool *constantPool) ([]string, error) {
-	count, err := loadVarUInt(buff)
-	if err != nil {
-		return nil, eris.Wrap(err, "error reading constants count")
-	}
-
-	constants := make([]string, count)
-	for i := range count {
-		constants[i], err = loadConstant(buff, pool)
-		if err != nil {
-			return nil, eris.Wrap(err, "error reading constant")
-		}
-	}
-
-	return constants, nil
-}
-
-func loadFlags(buff *buffer) (int16, error) {
-	flags, err := loadVarUInt(buff)
-	if err != nil {
-		return 0, eris.Wrap(err, "error reading flags")
-	}
-
-	if flags > 0x7FFF {
-		return 0, eris.Wrapf(err, "invalid flags: %d", flags)
-	}
-
-	return int16(flags), nil
 }

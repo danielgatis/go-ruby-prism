@@ -1,0 +1,206 @@
+<%- require_relative './utils.rb' -%>
+
+package parser
+
+import (
+    "fmt"
+)
+
+func loadNode(buff *SeekableBuffer, source []byte, constantPool *ConstantPool) (Node, error) {
+    nodeType, err := buff.ReadByte()
+    if err != nil {
+        return nil, fmt.Errorf("failed to read node type: %w", err)
+    }
+
+    startOffset, err := loadVarUInt(buff)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read start offset: %w", err)
+    }
+
+    length, err := loadVarUInt(buff)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read length: %w", err)
+    }
+
+    switch nodeType {
+        <%- array_types = [] -%>
+        <%- nodes.each_with_index do |node, index| -%>
+        case <%= index + 1 %>:
+        <%-
+        params = ["startOffset", "length"]
+        -%>
+        <%- if node.needs_serialized_length? -%>
+            serializedLength, err := loadInt(buff)
+            if err != nil {
+                return nil, fmt.Errorf("failed to read serialized length: %w", err)
+            }
+            <%- params << "serializedLength"  -%>
+        <%- end -%>
+        <%- if node.flags -%>
+            flags, err := loadFlags(buff)
+            if err != nil {
+                return nil, fmt.Errorf("failed to read flags: %w", err)
+            }
+            <%- params << "flags"  -%>
+        <%- end -%>
+        <%- node.semantic_fields.each.with_index(1) do |field, i| -%>
+            <%- if field.instance_of?(Prism::Template::NodeField) -%>
+                node<%= i %>, err := loadNode(buff, source, constantPool)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load node<%= i %>: %w", err)
+                }
+
+                <%- if field.go_type != 'Node' -%>
+                castedNode<%= i %>, ok := node<%= i %>.(<%= field.go_type %>)
+                if !ok {
+                    return nil, fmt.Errorf("failed to cast castedNode<%= i %> to <%= field.go_type %>")
+                }
+
+                <%- params << "castedNode#{i}"  -%>
+                <%- else -%>
+                <%- params << "node#{i}"  -%>
+                <%- end -%>
+            <%- end -%>
+            <%- if field.instance_of?(Prism::Template::OptionalNodeField) -%>
+                optionalNode<%= i %>, err := loadOptionalNode(buff, source, constantPool)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load optionalNode<%= i %>: %w", err)
+                }
+
+                <%- if field.go_type != 'Node' -%>
+                castedOptionalNode<%= i %>, ok := optionalNode<%= i %>.(<%= field.go_type %>)
+                if !ok {
+                    return nil, fmt.Errorf("failed to cast castedOptionalNode<%= i %> to <%= field.go_type %>")
+                }
+
+                <%- params << "castedOptionalNode#{i}"  -%>
+                <%- else -%>
+                <%- params << "optionalNode#{i}"  -%>
+                <%- end -%>
+            <%- end -%>
+            <%- if field.instance_of?(Prism::Template::StringField) -%>
+                str<%= i %>, err := loadString(buff, source)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load str<%= i %>: %w", err)
+                }
+                <%- params << "str#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::NodeListField) -%>
+                nodes<%= i %>, err := <%= "load#{field.go_type.sub('[]', '').sub('*', '').pascal_case}List(buff, source, constantPool)" %>
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load nodes<%= i %>: %w", err)
+                }
+                <%- array_types << field.go_type.sub('[]', '').sub('*', '').pascal_case -%>
+                <%- params << "nodes#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::ConstantField) -%>
+                constant<%= i %>, err := loadConstant(buff, constantPool)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load constant<%= i %>: %w", err)
+                }
+                <%- params << "constant#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::OptionalConstantField) -%>
+                optionalConstant<%= i %>, err := loadOptionalConstant(buff, constantPool)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load optionalConstant<%= i %>: %w", err)
+                }
+                <%- params << "optionalConstant#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::ConstantListField) -%>
+                constants<%= i %>, err := loadConstants(buff, constantPool)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load constants<%= i %>: %w", err)
+                }
+                <%- params << "constants#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::LocationField) -%>
+                location<%= i %>, err := loadLocation(buff)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load location<%= i %>: %w", err)
+                }
+                <%- params << "location#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::OptionalLocationField) -%>
+                optionalLocation<%= i %>, err := loadOptionalLocation(buff)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load optionalLocation<%= i %>: %w", err)
+                }
+                <%- params << "optionalLocation#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::UInt8Field) -%>
+                uint8field<%= i %>, err := buff.ReadByte()
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load uint8field<%= i %>: %w", err)
+                }
+                <%- params << "uint8field#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::UInt32Field) -%>
+                uint32field<%= i %>, err := loadVarUInt(buff)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load uint32field<%= i %>: %w", err)
+                }
+                <%- params << "uint32(uint32field#{i})"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::IntegerField) -%>
+                intField<%= i %>, err := loadInteger(buff)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load intField<%= i %>: %w", err)
+                }
+                <%- params << "intField#{i}"  -%>
+            <%- end %>
+            <%- if field.instance_of?(Prism::Template::DoubleField) -%>
+                doubleField<%= i %>, err := loadDouble(buff)
+                if err != nil {
+                    return nil, fmt.Errorf("failed to load doubleField<%= i %>: %w", err)
+                }
+                <%- params << "doubleField#{i}"  -%>
+            <%- end %>
+        <%- end -%>
+            return New<%= node.name.pascal_case %>(<%= params.join(", ") -%>), nil
+        <%- end -%>
+        default:
+            return nil, fmt.Errorf("unknown node type: %d", nodeType)
+    }
+}
+
+<%- array_types.uniq.each do |type| -%>
+
+func load<%= type %>List(buff *SeekableBuffer, source []byte, constantPool *ConstantPool) ([]<%= type == 'Node' ? 'Node' : "*#{type}" %>, error) {
+    length, err := loadVarUInt(buff)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read length: %w", err)
+    }
+
+    if length == 0 {
+        return nil, nil
+    }
+
+    nodes := make([]<%= type == 'Node' ? 'Node' : "*#{type}" %>, length)
+
+    for i := 0; i < length; i++ {
+        <%- if type == 'Node' -%>
+        node, err := loadNode(buff, source, constantPool)
+        if err != nil {
+            return nil, fmt.Errorf("failed to load node: %w", err)
+        }
+
+        nodes[i] = node
+        <%- else -%>
+        node, err := loadNode(buff, source, constantPool)
+        if err != nil {
+            return nil, fmt.Errorf("failed to load node: %w", err)
+        }
+
+        castedNode, ok := node.(*<%= type %>)
+        if !ok {
+            return nil, fmt.Errorf("failed to cast castedNode to <%= type %>")
+        }
+
+        nodes[i] = castedNode
+        <%- end -%>
+    }
+
+    return nodes, nil
+}
+<%- end -%>

@@ -1,31 +1,85 @@
-def const_prefix(name)
-  name.gsub("Flags", "").gsub(/([a-z])([A-Z])/, '\1_\2').upcase
+class String
+    def capitalize
+        self[0].upcase + self[1..-1]
+    end
+
+    def snake_case
+        self.gsub(/([a-z])([A-Z])/, '\1_\2').downcase
+    end
+
+    def pascal_case
+        self.split('_').map(&:capitalize).join
+    end
+
+    def camel_case
+        self.split('_').map.with_index { |part, i| i.zero? ? part : part.capitalize }.join
+    end
 end
 
-def arg(field)
-  field.name.gsub(/_([a-z])/) { $1.upcase }
+Prism::Template::NodeKindField.class_eval do
+    def go_type
+        if specific_kind
+            "*#{specific_kind}"
+        else
+            'Node'
+        end
+    end
 end
 
-def prop(field)
-  arg(field).capitalize
+Prism::Template::ConstantField.class_eval do
+    def go_type
+        'string'
+    end
 end
 
-def gotype(field)
-  case field
-  when Prism::Template::NodeField then field.ruby_type == "Node" ? "Node" : "*#{field.ruby_type}"
-  when Prism::Template::OptionalNodeField then field.ruby_type == "Node" ? "Node" : "*#{field.ruby_type}"
-  when Prism::Template::NodeListField then "[]Node"
-  when Prism::Template::StringField then "string"
-  when Prism::Template::ConstantField then "string"
-  when Prism::Template::OptionalConstantField then "*string"
-  when Prism::Template::ConstantListField then "[]string"
-  when Prism::Template::LocationField then "*Location"
-  when Prism::Template::OptionalLocationField then "*Location"
-  when Prism::Template::FlagsField then field.options[:kind]
-  when Prism::Template::DoubleField then "float64"
-  when Prism::Template::UInt8Field then "uint8"
-  when Prism::Template::UInt32Field then "uint32"
-  when Prism::Template::IntegerField then "*big.Int"
-  else raise "Unknown field type: #{field.inspect}"
-  end
+Prism::Template::OptionalConstantField.class_eval do
+    def go_type
+        '*string'
+    end
+end
+
+Prism::Template::ConstantListField.class_eval do
+    def go_type
+        '[]string'
+    end
+end
+
+Prism::Template::DoubleField.class_eval do
+    def go_type
+        'float64'
+    end
+end
+
+Prism::Template::IntegerField.class_eval do
+    def go_type
+        '*big.Int'
+    end
+end
+
+Prism::Template::UInt32Field.class_eval do
+    def go_type
+        'uint32'
+    end
+end
+
+Prism::Template::UInt8Field.class_eval do
+    def go_type
+        'uint8'
+    end
+end
+
+Prism::Template::StringField.class_eval do
+    def go_type
+        'string'
+    end
+end
+
+Prism::Template::NodeListField.class_eval do
+    def go_type
+        if specific_kind
+            "[]*#{specific_kind}"
+        else
+            '[]Node'
+        end
+    end
 end
