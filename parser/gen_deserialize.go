@@ -85,15 +85,15 @@ func NewSerializationBuffer(source, array []byte) *SerializationBuffer {
 	}
 }
 
-// ReadByte reads a single byte from the buffer.
-func (b *SerializationBuffer) ReadByte() byte {
+// ReadRawByte reads a single byte from the buffer.
+func (b *SerializationBuffer) ReadRawByte() byte {
 	result := b.array[b.index]
 	b.index++
 	return result
 }
 
-// ReadBytes reads the specified number of bytes from the buffer.
-func (b *SerializationBuffer) ReadBytes(length int) []byte {
+// ReadRawBytes reads the specified number of bytes from the buffer.
+func (b *SerializationBuffer) ReadRawBytes(length int) []byte {
 	result := b.array[b.index : b.index+length]
 	b.index += length
 	return result
@@ -101,7 +101,7 @@ func (b *SerializationBuffer) ReadBytes(length int) []byte {
 
 // ReadString reads a string of the specified length with encoding flags.
 func (b *SerializationBuffer) ReadString(length int, flags uint32) string {
-	return b.decodeString(b.ReadBytes(length), flags).Value
+	return b.decodeString(b.ReadRawBytes(length), flags).Value
 }
 
 // ReadUint32 reads a 32-bit unsigned integer in little-endian format.
@@ -123,7 +123,7 @@ func (b *SerializationBuffer) ReadVarInt() int {
 	var shift uint
 
 	for {
-		byteVal := b.ReadByte()
+		byteVal := b.ReadRawByte()
 		result += int(byteVal&0x7f) << shift
 		shift += 7
 
@@ -145,7 +145,7 @@ func (b *SerializationBuffer) ReadLocation() Location {
 
 // ReadOptionalLocation reads an optional location from the buffer.
 func (b *SerializationBuffer) ReadOptionalLocation() *Location {
-	if b.ReadByte() != 0 {
+	if b.ReadRawByte() != 0 {
 		loc := b.ReadLocation()
 		return &loc
 	}
@@ -154,7 +154,7 @@ func (b *SerializationBuffer) ReadOptionalLocation() *Location {
 
 // ReadStringField reads a string field with encoding flags.
 func (b *SerializationBuffer) ReadStringField(flags uint32) RubyString {
-	stringType := b.ReadByte()
+	stringType := b.ReadRawByte()
 
 	switch stringType {
 	case 1:
@@ -163,7 +163,7 @@ func (b *SerializationBuffer) ReadStringField(flags uint32) RubyString {
 		return b.decodeString(b.source[startOffset:startOffset+length], flags)
 	case 2:
 		length := b.ReadVarInt()
-		return b.decodeString(b.ReadBytes(length), flags)
+		return b.decodeString(b.ReadRawBytes(length), flags)
 	default:
 		panic(fmt.Sprintf("Unknown serialized string type: %d", stringType))
 	}
@@ -185,7 +185,7 @@ func (b *SerializationBuffer) ScanConstant(constantPoolOffset int, constantIndex
 
 // ReadDouble reads a double-precision floating point number.
 func (b *SerializationBuffer) ReadDouble() float64 {
-	bytes := b.ReadBytes(8)
+	bytes := b.ReadRawBytes(8)
 	bits := binary.LittleEndian.Uint64(bytes)
 	return *(*float64)(unsafe.Pointer(&bits))
 }
@@ -570,12 +570,12 @@ func Deserialize(source, array []byte) (*ParseResult, error) {
 	}
 
 	// Check version
-	if buffer.ReadByte() != majorVersion || buffer.ReadByte() != minorVersion || buffer.ReadByte() != patchVersion {
+	if buffer.ReadRawByte() != majorVersion || buffer.ReadRawByte() != minorVersion || buffer.ReadRawByte() != patchVersion {
 		return nil, errors.New("invalid serialization")
 	}
 
 	// Check location fields flag
-	if buffer.ReadByte() != 0 {
+	if buffer.ReadRawByte() != 0 {
 		return nil, errors.New("invalid serialization (location fields must be included but are not)")
 	}
 
@@ -619,21 +619,21 @@ func Deserialize(source, array []byte) (*ParseResult, error) {
 	errorsCount := buffer.ReadVarInt()
 	errors := make([]ParseError, errorsCount)
 	for i := 0; i < errorsCount; i++ {
-		wType := buffer.ReadVarInt()
+		eType := buffer.ReadVarInt()
 		messageLength := buffer.ReadVarInt()
 		message := buffer.ReadString(messageLength, 0)
 		location := buffer.ReadLocation()
-		level := buffer.ReadByte()
+		level := buffer.ReadRawByte()
 
-		var warningType string
-		if wType >= 0 && wType < len(warningTypes) {
-			warningType = warningTypes[wType]
+		var errorType string
+		if eType >= 0 && eType < len(errorTypes) {
+			errorType = errorTypes[eType]
 		} else {
-			warningType = "unknown"
+			errorType = "unknown"
 		}
 
 		errors[i] = ParseError{
-			Type:     warningType,
+			Type:     errorType,
 			Message:  message,
 			Location: location,
 			Level:    errorLevels[level],
@@ -648,7 +648,7 @@ func Deserialize(source, array []byte) (*ParseResult, error) {
 		messageLength := buffer.ReadVarInt()
 		message := buffer.ReadString(messageLength, 0)
 		location := buffer.ReadLocation()
-		level := buffer.ReadByte()
+		level := buffer.ReadRawByte()
 
 		var warningType string
 		if wType >= 0 && wType < len(warningTypes) {
@@ -686,7 +686,7 @@ func Deserialize(source, array []byte) (*ParseResult, error) {
 }
 
 func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, constantPoolOffset int) Node {
-	nodeType := buffer.ReadByte()
+	nodeType := buffer.ReadRawByte()
 	nodeID := buffer.ReadVarInt()
 	location := buffer.ReadLocation()
 
@@ -695,7 +695,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 	}
 
 	readOptionalNode := func() Node {
-		if buffer.ReadByte() != 0 {
+		if buffer.ReadRawByte() != 0 {
 			buffer.index--
 			return readRequiredNode()
 		}
@@ -724,7 +724,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 	}
 
 	readInteger := func() int64 {
-		negative := buffer.ReadByte() != 0
+		negative := buffer.ReadRawByte() != 0
 		length := buffer.ReadVarInt()
 
 		firstWord := uint64(buffer.ReadVarInt())
@@ -1561,7 +1561,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		return NewNoKeywordsParameterNode(nodeID, location, flags, buffer.ReadLocation(), buffer.ReadLocation())
 	case 110:
 		flags = uint32(buffer.ReadVarInt())
-		return NewNumberedParametersNode(nodeID, location, flags, buffer.ReadByte())
+		return NewNumberedParametersNode(nodeID, location, flags, buffer.ReadRawByte())
 	case 111:
 		flags = uint32(buffer.ReadVarInt())
 		return NewNumberedReferenceReadNode(nodeID, location, flags, uint32(buffer.ReadVarInt()))

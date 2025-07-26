@@ -12,6 +12,7 @@ init_submodules:
 generate:
 		@echo "Generating go files"
 		go generate ./...
+		go fmt ./...
 
 format:
 		@echo "Formatting go files"
