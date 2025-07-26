@@ -1705,7 +1705,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 				return n
 			}
 			return nil
-		}(), func() *StatementsNode {
+		}(), buffer.ReadOptionalLocation(), func() *StatementsNode {
 			if n := readOptionalNode(); n != nil {
 				return n.(*StatementsNode)
 			}

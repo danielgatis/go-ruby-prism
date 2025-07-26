@@ -65,6 +65,11 @@ const (
 	ParameterFlagsREPEATED_PARAMETER = 1 << 2
 )
 
+// Flags for parentheses nodes.
+const (
+	ParenthesesNodeFlagsMULTIPLE_STATEMENTS = 1 << 2
+)
+
 // Flags for range and flip-flop nodes.
 const (
 	RangeFlagsEXCLUDE_END = 1 << 2
@@ -8803,6 +8808,11 @@ func (n *ParenthesesNode) GetNodeID() int {
 	return n.NodeID
 }
 
+// IsMULTIPLE_STATEMENTS returns true if this node has the MULTIPLE_STATEMENTS flag.
+func (n *ParenthesesNode) IsMULTIPLE_STATEMENTS() bool {
+	return (n.flags & ParenthesesNodeFlagsMULTIPLE_STATEMENTS) != 0
+}
+
 // Accept calls the appropriate visit method on the visitor.
 func (n *ParenthesesNode) Accept(visitor Visitor) {
 	visitor.VisitParenthesesNode(n)
@@ -9727,29 +9737,31 @@ func (n *RescueModifierNode) ToJSON() map[string]interface{} {
 //
 // `Foo, *splat, Bar` are in the `exceptions` field. `ex` is in the `reference` field.
 type RescueNode struct {
-	NodeID      int      `json:"nodeID"`
-	Location    Location `json:"location"`
-	flags       uint32
-	KeywordLoc  Location        `json:"keyword_loc"`
-	Exceptions  []Node          `json:"exceptions"`
-	OperatorLoc *Location       `json:"operator_loc"`
-	Reference   Node            `json:"reference"`
-	Statements  *StatementsNode `json:"statements"`
-	Subsequent  *RescueNode     `json:"subsequent"`
+	NodeID         int      `json:"nodeID"`
+	Location       Location `json:"location"`
+	flags          uint32
+	KeywordLoc     Location        `json:"keyword_loc"`
+	Exceptions     []Node          `json:"exceptions"`
+	OperatorLoc    *Location       `json:"operator_loc"`
+	Reference      Node            `json:"reference"`
+	ThenKeywordLoc *Location       `json:"then_keyword_loc"`
+	Statements     *StatementsNode `json:"statements"`
+	Subsequent     *RescueNode     `json:"subsequent"`
 }
 
 // NewRescueNode creates a new RescueNode.
-func NewRescueNode(nodeID int, location Location, flags uint32, keyword_loc Location, exceptions []Node, operator_loc *Location, reference Node, statements *StatementsNode, subsequent *RescueNode) *RescueNode {
+func NewRescueNode(nodeID int, location Location, flags uint32, keyword_loc Location, exceptions []Node, operator_loc *Location, reference Node, then_keyword_loc *Location, statements *StatementsNode, subsequent *RescueNode) *RescueNode {
 	return &RescueNode{
-		NodeID:      nodeID,
-		Location:    location,
-		flags:       flags,
-		KeywordLoc:  keyword_loc,
-		Exceptions:  exceptions,
-		OperatorLoc: operator_loc,
-		Reference:   reference,
-		Statements:  statements,
-		Subsequent:  subsequent,
+		NodeID:         nodeID,
+		Location:       location,
+		flags:          flags,
+		KeywordLoc:     keyword_loc,
+		Exceptions:     exceptions,
+		OperatorLoc:    operator_loc,
+		Reference:      reference,
+		ThenKeywordLoc: then_keyword_loc,
+		Statements:     statements,
+		Subsequent:     subsequent,
 	}
 }
 
@@ -9803,15 +9815,16 @@ func (n *RescueNode) CompactChildNodes() []Node {
 // ToJSON converts the node to a JSON-serializable map.
 func (n *RescueNode) ToJSON() map[string]interface{} {
 	return map[string]interface{}{
-		"type":         "RescueNode",
-		"location":     n.Location,
-		"flags":        n.flags,
-		"keyword_loc":  n.KeywordLoc,
-		"exceptions":   n.Exceptions,
-		"operator_loc": n.OperatorLoc,
-		"reference":    n.Reference,
-		"statements":   n.Statements,
-		"subsequent":   n.Subsequent,
+		"type":             "RescueNode",
+		"location":         n.Location,
+		"flags":            n.flags,
+		"keyword_loc":      n.KeywordLoc,
+		"exceptions":       n.Exceptions,
+		"operator_loc":     n.OperatorLoc,
+		"reference":        n.Reference,
+		"then_keyword_loc": n.ThenKeywordLoc,
+		"statements":       n.Statements,
+		"subsequent":       n.Subsequent,
 	}
 }
 
