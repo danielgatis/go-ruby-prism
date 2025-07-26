@@ -449,7 +449,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 				end
 			when Prism::Template::OptionalNodeField then
 				if field.ruby_type == "Node"
-					"func() #{field.ruby_type} { if n := readOptionalNode(); n != nil { return n.(#{field.ruby_type}) }; return nil }()"
+					"func() #{field.ruby_type} { if n := readOptionalNode(); n != nil { return n }; return nil }()"
 				else
 					"func() *#{field.ruby_type} { if n := readOptionalNode(); n != nil { return n.(*#{field.ruby_type}) }; return nil }()"
 				end

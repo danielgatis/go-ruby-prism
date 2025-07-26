@@ -790,7 +790,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewArrayPatternNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []Node {
@@ -802,7 +802,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nodes
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []Node {
@@ -820,7 +820,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewAssocSplatNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation())
@@ -854,7 +854,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewBlockArgumentNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation())
@@ -872,12 +872,12 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return result
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation(), buffer.ReadLocation())
@@ -911,7 +911,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewCallAndWriteNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation(), buffer.ReadOptionalLocation(), readRequiredConstant(), readRequiredConstant(), buffer.ReadLocation(), readRequiredNode())
@@ -919,7 +919,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewCallNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation(), readRequiredConstant(), buffer.ReadOptionalLocation(), buffer.ReadOptionalLocation(), func() *ArgumentsNode {
@@ -929,7 +929,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nil
 		}(), buffer.ReadOptionalLocation(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}())
@@ -937,7 +937,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewCallOperatorWriteNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation(), buffer.ReadOptionalLocation(), readRequiredConstant(), readRequiredConstant(), readRequiredConstant(), buffer.ReadLocation(), readRequiredNode())
@@ -945,7 +945,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewCallOrWriteNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation(), buffer.ReadOptionalLocation(), readRequiredConstant(), readRequiredConstant(), buffer.ReadLocation(), readRequiredNode())
@@ -959,7 +959,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewCaseMatchNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []Node {
@@ -979,7 +979,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewCaseNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []Node {
@@ -1006,12 +1006,12 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return result
 		}(), buffer.ReadLocation(), readRequiredNode(), buffer.ReadOptionalLocation(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation(), readRequiredConstant())
@@ -1049,7 +1049,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewConstantPathNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), readOptionalConstant(), buffer.ReadLocation(), buffer.ReadLocation())
@@ -1063,7 +1063,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewConstantPathTargetNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), readOptionalConstant(), buffer.ReadLocation(), buffer.ReadLocation())
@@ -1084,7 +1084,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewDefNode(nodeID, location, flags, readRequiredConstant(), buffer.ReadLocation(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() *ParametersNode {
@@ -1094,7 +1094,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nil
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []string {
@@ -1142,7 +1142,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewFindPatternNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), readRequiredNode().(*SplatNode), func() []Node {
@@ -1157,12 +1157,12 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewFlipFlopNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation())
@@ -1223,7 +1223,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewHashPatternNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []Node {
@@ -1235,7 +1235,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nodes
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation(), buffer.ReadOptionalLocation())
@@ -1248,7 +1248,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nil
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation())
@@ -1273,7 +1273,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewIndexAndWriteNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation(), buffer.ReadLocation(), func() *ArgumentsNode {
@@ -1291,7 +1291,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewIndexOperatorWriteNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation(), buffer.ReadLocation(), func() *ArgumentsNode {
@@ -1309,7 +1309,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewIndexOrWriteNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadOptionalLocation(), buffer.ReadLocation(), func() *ArgumentsNode {
@@ -1437,12 +1437,12 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return result
 		}(), buffer.ReadLocation(), buffer.ReadLocation(), buffer.ReadLocation(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}())
@@ -1497,7 +1497,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return result
 		}(), buffer.ReadLocation(), readRequiredNode(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation(), readRequiredConstant())
@@ -1512,7 +1512,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nodes
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []Node {
@@ -1534,7 +1534,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nodes
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []Node {
@@ -1592,7 +1592,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nodes
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() []Node {
@@ -1611,7 +1611,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nodes
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() *BlockParameterNode {
@@ -1624,7 +1624,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewParenthesesNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation(), buffer.ReadLocation())
@@ -1664,12 +1664,12 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewRangeNode(nodeID, location, flags, func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation())
@@ -1702,7 +1702,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nodes
 		}(), buffer.ReadOptionalLocation(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), func() *StatementsNode {
@@ -1747,7 +1747,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return result
 		}(), buffer.ReadLocation(), buffer.ReadLocation(), readRequiredNode(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}(), buffer.ReadLocation())
@@ -1764,7 +1764,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 		flags = uint32(buffer.ReadVarInt())
 		return NewSplatNode(nodeID, location, flags, buffer.ReadLocation(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}())
@@ -1790,7 +1790,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 			return nil
 		}(), buffer.ReadOptionalLocation(), func() Node {
 			if n := readOptionalNode(); n != nil {
-				return n.(Node)
+				return n
 			}
 			return nil
 		}())
