@@ -24,4 +24,7 @@ go.work
 tmp/
 
 # fixtures
-**/test/fixtures/**/*
+test/fixtures/**/*
+
+# wasi-sdk
+wasi-sdk-*

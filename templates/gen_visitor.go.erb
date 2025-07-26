@@ -1,0 +1,80 @@
+package parser
+
+// BasicVisitor provides the interface for walking down the tree. None of the individual visit
+// methods are implemented on this interface, so it forces the consumer to
+// implement each one that they need. For a default implementation that
+// continues walking the tree, see the `Visitor` interface and `DefaultVisitor` struct.
+type BasicVisitor interface {
+	// Visit calls Accept on the given node if it is not nil, which in turn should
+	// call back into this visitor by calling the appropriate Visit* method.
+	Visit(node Node)
+
+	// VisitAll visits each node in the slice by calling Accept on each one.
+	VisitAll(nodes []Node)
+
+	// VisitChildNodes visits the child nodes of the given node by calling Accept on each one.
+	VisitChildNodes(node Node)
+}
+
+// Visitor provides a default implementation for every visit method defined on the nodes.
+// This means it can walk a tree without the caller needing to define any special handling.
+// This allows you to handle a subset of the tree, while still walking the whole tree.
+//
+// For example, to find all of the method calls that call the "foo" method, you
+// could implement:
+//
+//	type FooCallVisitor struct {
+//		DefaultVisitor
+//		FooCalls []*CallNode
+//	}
+//
+//	func (v *FooCallVisitor) VisitCallNode(node *CallNode) {
+//		if node.Name == "foo" {
+//			v.FooCalls = append(v.FooCalls, node)
+//		}
+//		// Call the default implementation to continue walking the tree
+//		v.DefaultVisitor.VisitCallNode(node)
+//	}
+type Visitor interface {
+	BasicVisitor
+<%- nodes.each do |node| -%>
+
+	// Visit<%= node.name %> visits a <%= node.name %> node.
+	Visit<%= node.name %>(node *<%= node.name %>)
+<%- end -%>
+}
+
+// DefaultVisitor provides a default implementation of the Visitor interface
+// that simply continues walking the tree by visiting child nodes.
+type DefaultVisitor struct{}
+
+// Visit calls Accept on the given node if it is not nil.
+func (v *DefaultVisitor) Visit(node Node) {
+	if node != nil {
+		node.Accept(v)
+	}
+}
+
+// VisitAll visits each node in the slice by calling Accept on each one.
+func (v *DefaultVisitor) VisitAll(nodes []Node) {
+	for _, node := range nodes {
+		if node != nil {
+			node.Accept(v)
+		}
+	}
+}
+
+// VisitChildNodes visits the child nodes of the given node by calling Accept on each one.
+func (v *DefaultVisitor) VisitChildNodes(node Node) {
+	for _, childNode := range node.CompactChildNodes() {
+		childNode.Accept(v)
+	}
+}
+
+<%- nodes.each do |node| -%>
+
+// Visit<%= node.name %> visits a <%= node.name %> node.
+func (v *DefaultVisitor) Visit<%= node.name %>(node *<%= node.name %>) {
+	v.VisitChildNodes(node)
+}
+<%- end -%>

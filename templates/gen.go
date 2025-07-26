@@ -1,7 +1,5 @@
 package node
 
-//go:generate ruby ./template.rb gen_node.go ../parser/gen_node.go
-//go:generate ruby ./template.rb gen_syntaxe_error.go ../parser/gen_syntaxe_error.go
-//go:generate ruby ./template.rb gen_syntaxe_warn.go ../parser/gen_syntaxe_warn.go
-//go:generate ruby ./template.rb gen_loader_node.go ../parser/gen_loader_node.go
-//go:generate ruby ./template.rb gen_flags.go ../parser/gen_flags.go
+//go:generate ruby ../prism/templates/template.rb ../../templates/gen_deserialize.go ../parser/gen_deserialize.go
+//go:generate ruby ../prism/templates/template.rb ../../templates/gen_nodes.go ../parser/gen_nodes.go
+//go:generate ruby ../prism/templates/template.rb ../../templates/gen_visitor.go ../parser/gen_visitor.go

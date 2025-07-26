@@ -1,0 +1,173 @@
+<%-
+
+def gocamelcase(string)
+  string.gsub(/_([a-z])/) { $1.upcase }.gsub(/^([a-z])/) { $1.upcase }
+end
+
+def goprop(field)
+  field.name == "arguments" ? "Arguments" : gocamelcase(field.name)
+end
+
+def gotype(field)
+  case field
+  when Prism::Template::NodeField then
+  	if field.ruby_type == "Node"
+  		"Node"
+  	else
+  		"*#{field.ruby_type}"
+  	end
+  when Prism::Template::OptionalNodeField then
+  	if field.ruby_type == "Node"
+  		"Node"
+  	else
+  		"*#{field.ruby_type}"
+  	end
+  when Prism::Template::NodeListField then "[]Node"
+  when Prism::Template::StringField then "RubyString"
+  when Prism::Template::ConstantField then "string"
+  when Prism::Template::OptionalConstantField then "*string"
+  when Prism::Template::ConstantListField then "[]string"
+  when Prism::Template::LocationField then "Location"
+  when Prism::Template::OptionalLocationField then "*Location"
+  when Prism::Template::UInt8Field then "uint8"
+  when Prism::Template::UInt32Field then "uint32"
+  when Prism::Template::IntegerField then "int64"
+  when Prism::Template::DoubleField then "float64"
+  else raise
+  end
+end
+-%>
+package parser
+
+<%- flags.each do |flag| -%>
+
+// <%= flag.comment %>
+const (
+<%- flag.values.each_with_index do |value, index| -%>
+	<%= gocamelcase(flag.name) %><%= gocamelcase(value.name) %> = 1 << <%= index + Prism::Template::COMMON_FLAGS_COUNT %>
+<%- end -%>
+)
+<%- end -%>
+
+// Location represents a location in the source code.
+type Location struct {
+	StartOffset int `json:"startOffset"`
+	Length      int `json:"length"`
+}
+
+// RubyString represents an encoded Ruby string.
+type RubyString struct {
+	Value         string `json:"value"`
+	Encoding      string `json:"encoding"`
+	ValidEncoding bool   `json:"validEncoding"`
+}
+
+// Node represents a generic node in the tree.
+type Node interface {
+	Accept(visitor Visitor)
+	ChildNodes() []Node
+	CompactChildNodes() []Node
+	ToJSON() map[string]interface{}
+	GetLocation() Location
+	GetNodeID() int
+}
+
+<%- nodes.each do |node| -%>
+
+<%- node.each_comment_line do |line| -%>
+//<%= line %>
+<%- end -%>
+type <%= node.name %> struct {
+	NodeID   int      `json:"nodeID"`
+	Location Location `json:"location"`
+	flags    uint32
+	<%- node.fields.each do |field| -%>
+	<%= goprop(field) %> <%= gotype(field) %> `json:"<%= field.name == "arguments" ? "arguments" : field.name %>"`
+	<%- end -%>
+}
+
+// New<%= node.name %> creates a new <%= node.name %>.
+func New<%= node.name %>(<%- params = ["nodeID int", "location Location", "flags uint32"] + node.fields.map { |field| "#{field.name == "arguments" ? "arguments" : field.name} #{gotype(field)}" } -%><%= params.join(", ") %>) *<%= node.name %> {
+	return &<%= node.name %>{
+		NodeID:   nodeID,
+		Location: location,
+		flags:    flags,
+		<%- node.fields.each do |field| -%>
+		<%= goprop(field) %>: <%= field.name == "arguments" ? "arguments" : field.name %>,
+		<%- end -%>
+	}
+}
+
+// GetLocation returns the location of this node.
+func (n *<%= node.name %>) GetLocation() Location {
+	return n.Location
+}
+
+// GetNodeID returns the node ID of this node.
+func (n *<%= node.name %>) GetNodeID() int {
+	return n.NodeID
+}
+
+<%- if (node_flags = node.flags) -%>
+<%- node_flags.values.each do |value| -%>
+// Is<%= gocamelcase(value.name) %> returns true if this node has the <%= gocamelcase(value.name) %> flag.
+func (n *<%= node.name %>) Is<%= gocamelcase(value.name) %>() bool {
+	return (n.flags & <%= gocamelcase(node_flags.name) %><%= gocamelcase(value.name) %>) != 0
+}
+
+<%- end -%>
+<%- end -%>
+// Accept calls the appropriate visit method on the visitor.
+func (n *<%= node.name %>) Accept(visitor Visitor) {
+	visitor.Visit<%= node.name %>(n)
+}
+
+// ChildNodes returns all child nodes of the current node.
+func (n *<%= node.name %>) ChildNodes() []Node {
+	nodes := []Node{}
+	<%- node.fields.each do |field| -%>
+	<%- case field -%>
+	<%- when Prism::Template::NodeField -%>
+	nodes = append(nodes, n.<%= goprop(field) %>)
+	<%- when Prism::Template::OptionalNodeField -%>
+	if n.<%= goprop(field) %> != nil {
+		nodes = append(nodes, n.<%= goprop(field) %>)
+	}
+	<%- when Prism::Template::NodeListField -%>
+	nodes = append(nodes, n.<%= goprop(field) %>...)
+	<%- end -%>
+	<%- end -%>
+	return nodes
+}
+
+// CompactChildNodes returns all non-nil child nodes.
+func (n *<%= node.name %>) CompactChildNodes() []Node {
+	nodes := []Node{}
+	<%- node.fields.each do |field| -%>
+	<%- case field -%>
+	<%- when Prism::Template::NodeField -%>
+	nodes = append(nodes, n.<%= goprop(field) %>)
+	<%- when Prism::Template::OptionalNodeField -%>
+	if n.<%= goprop(field) %> != nil {
+		nodes = append(nodes, n.<%= goprop(field) %>)
+	}
+	<%- when Prism::Template::NodeListField -%>
+	nodes = append(nodes, n.<%= goprop(field) %>...)
+	<%- end -%>
+	<%- end -%>
+	return nodes
+}
+
+// ToJSON converts the node to a JSON-serializable map.
+func (n *<%= node.name %>) ToJSON() map[string]interface{} {
+	return map[string]interface{}{
+		"type":     "<%= node.name %>",
+		"location": n.Location,
+		"flags":    n.flags,
+		<%- node.fields.each do |field| -%>
+		"<%= field.name == "arguments" ? "arguments" : field.name %>": n.<%= goprop(field) %>,
+		<%- end -%>
+	}
+}
+
+<%- end -%>
