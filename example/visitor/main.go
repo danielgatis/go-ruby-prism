@@ -36,7 +36,7 @@ func main() {
 	p, _ := parser.NewParser(ctx)
 	defer p.Close(ctx)
 
-	source := "1+1"
+	source := "puts 'Hello, World!'"
 	result, err := p.Parse(ctx, []byte(source))
 	if err != nil {
 		fmt.Println(err)

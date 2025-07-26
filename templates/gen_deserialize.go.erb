@@ -298,14 +298,21 @@ func Deserialize(source, array []byte) (*ParseResult, error) {
 	errorsCount := buffer.ReadVarInt()
 	errors := make([]ParseError, errorsCount)
 	for i := 0; i < errorsCount; i++ {
-		errorType := buffer.ReadVarInt()
+		wType := buffer.ReadVarInt()
 		messageLength := buffer.ReadVarInt()
 		message := buffer.ReadString(messageLength, 0)
 		location := buffer.ReadLocation()
 		level := buffer.ReadByte()
 
+		var warningType string
+		if wType >= 0 && wType < len(warningTypes) {
+			warningType = warningTypes[wType]
+		} else {
+			warningType = "unknown"
+		}
+
 		errors[i] = ParseError{
-			Type:     errorTypes[errorType],
+			Type:     warningType,
 			Message:  message,
 			Location: location,
 			Level:    errorLevels[level],
@@ -316,14 +323,21 @@ func Deserialize(source, array []byte) (*ParseResult, error) {
 	warningsCount := buffer.ReadVarInt()
 	warnings := make([]ParseWarning, warningsCount)
 	for i := 0; i < warningsCount; i++ {
-		warningType := buffer.ReadVarInt()
+		wType := buffer.ReadVarInt()
 		messageLength := buffer.ReadVarInt()
 		message := buffer.ReadString(messageLength, 0)
 		location := buffer.ReadLocation()
 		level := buffer.ReadByte()
 
+		var warningType string
+		if wType >= 0 && wType < len(warningTypes) {
+			warningType = warningTypes[wType]
+		} else {
+			warningType = "unknown"
+		}
+
 		warnings[i] = ParseWarning{
-			Type:     warningTypes[warningType],
+			Type:     warningType,
 			Message:  message,
 			Location: location,
 			Level:    warningLevels[level],
