@@ -24,7 +24,6 @@ func (v *visitor) Visit(node parser.Node) {
 }
 
 func (v *visitor) Traverse(node parser.Node) {
-	fmt.Printf("🌲 Traversing node: %T\n", node)
 	v.Visit(node)
 	for _, child := range node.ChildNodes() {
 		v.Traverse(child)
@@ -47,7 +46,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("🧭 Beginning AST traversal...")
+	fmt.Printf("🌲 Traversing the AST...\n")
 	visitor := NewVisitor()
 	visitor.Traverse(result.Value)
 	fmt.Println("✅ AST traversal complete!")
