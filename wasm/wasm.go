@@ -100,7 +100,10 @@ func (r *Runtime) Calloc(ctx context.Context, size uint64, count uint64) (uint64
 
 func (r *Runtime) Free(ctx context.Context, ptr uint64) error {
 	_, err := r.modFree.Call(ctx, ptr)
-	return fmt.Errorf("failed to free the memory: %w", err)
+	if err != nil {
+		return fmt.Errorf("failed to free the memory: %w", err)
+	}
+	return nil
 }
 
 func (r *Runtime) BufferSizeOf(ctx context.Context) (uint64, error) {
