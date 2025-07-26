@@ -8,34 +8,35 @@ import (
 	"github.com/danielgatis/go-ruby-prism/parser"
 )
 
-var _ parser.AbstractNodeVisitor = (*visitor)(nil)
+var _ parser.Visitor = (*visitor)(nil)
 
 type visitor struct {
-	parser.BaseAbstractNodeVisitor
+	parser.DefaultVisitor
 }
 
 func NewVisitor() *visitor {
 	return &visitor{}
 }
 
-func (v *visitor) DefaultVisit(node parser.Node) {
+func (v *visitor) Visit(node parser.Node) {
 	fmt.Printf("%T\n", node)
+	v.DefaultVisitor.Visit(node)
 }
 
-func (v *visitor) traverse(node parser.Node) {
-	node.Accept(v)
+func (v *visitor) Traverse(node parser.Node) {
+	v.Visit(node)
 	for _, child := range node.ChildNodes() {
-		v.traverse(child)
+		v.Traverse(child)
 	}
 }
 
 func main() {
 	ctx := context.Background()
 
-	p, _ := parser.NewParser(ctx, parser.WithLogger(parser.NewDefaultLogger()))
+	p, _ := parser.NewParser(ctx)
 	defer p.Close(ctx)
 
-	source := "puts 'Hello, World!'"
+	source := "1+1"
 	result, err := p.Parse(ctx, []byte(source))
 	if err != nil {
 		fmt.Println(err)
@@ -43,5 +44,5 @@ func main() {
 	}
 
 	visitor := NewVisitor()
-	visitor.traverse(result.Value)
+	visitor.Traverse(result.Value)
 }

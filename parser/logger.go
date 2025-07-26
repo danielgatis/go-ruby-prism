@@ -19,3 +19,15 @@ func NewDefaultLogger() *DefaultLogger {
 func (l *DefaultLogger) Debug(message string, args ...any) {
 	fmt.Printf(message+"\n", args...)
 }
+
+type NullLogger struct {
+	Logger
+}
+
+func NewNullLogger() *NullLogger {
+	return &NullLogger{}
+}
+
+func (l *NullLogger) Debug(message string, args ...any) {
+	// Do nothing
+}

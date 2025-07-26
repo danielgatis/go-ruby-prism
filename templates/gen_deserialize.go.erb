@@ -1,0 +1,459 @@
+package parser
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"math/big"
+	"unicode/utf8"
+	"unsafe"
+)
+
+const (
+	majorVersion = 1
+	minorVersion = 3
+	patchVersion = 0
+)
+
+// Comment represents a comment in the source code.
+type Comment struct {
+	Type     int      `json:"type"`
+	Location Location `json:"location"`
+}
+
+// MagicComment represents a magic comment in the source code.
+type MagicComment struct {
+	StartLocation Location `json:"startLocation"`
+	EndLocation   Location `json:"endLocation"`
+}
+
+// ParseError represents an error in the source code.
+type ParseError struct {
+	Type     string   `json:"type"`
+	Message  string   `json:"message"`
+	Location Location `json:"location"`
+	Level    string   `json:"level"`
+}
+
+// ParseWarning represents a warning in the source code.
+type ParseWarning struct {
+	Type     string   `json:"type"`
+	Message  string   `json:"message"`
+	Location Location `json:"location"`
+	Level    string   `json:"level"`
+}
+
+// ParseResult represents the result of parsing the source code.
+type ParseResult struct {
+	Value         *ProgramNode    `json:"value"`
+	Comments      []Comment       `json:"comments"`
+	MagicComments []MagicComment  `json:"magicComments"`
+	DataLoc       *Location       `json:"dataLoc"`
+	Errors        []ParseError    `json:"errors"`
+	Warnings      []ParseWarning  `json:"warnings"`
+}
+
+// SerializationBuffer handles reading from the serialized binary format.
+type SerializationBuffer struct {
+	source      []byte
+	array       []byte
+	index       int
+	fileEncoding string
+}
+
+// Constants for string encoding flags
+const (
+	forcedUTF8EncodingFlag   = 1 << 2
+	forcedBinaryEncodingFlag = 1 << 3
+)
+
+// NewSerializationBuffer creates a new SerializationBuffer.
+func NewSerializationBuffer(source, array []byte) *SerializationBuffer {
+	return &SerializationBuffer{
+		source:      source,
+		array:       array,
+		index:       0,
+		fileEncoding: "utf-8",
+	}
+}
+
+// ReadByte reads a single byte from the buffer.
+func (b *SerializationBuffer) ReadByte() byte {
+	result := b.array[b.index]
+	b.index++
+	return result
+}
+
+// ReadBytes reads the specified number of bytes from the buffer.
+func (b *SerializationBuffer) ReadBytes(length int) []byte {
+	result := b.array[b.index : b.index+length]
+	b.index += length
+	return result
+}
+
+// ReadString reads a string of the specified length with encoding flags.
+func (b *SerializationBuffer) ReadString(length int, flags uint32) string {
+	return b.decodeString(b.ReadBytes(length), flags).Value
+}
+
+// ReadUint32 reads a 32-bit unsigned integer in little-endian format.
+func (b *SerializationBuffer) ReadUint32() uint32 {
+	result := b.scanUint32(b.index)
+	b.index += 4
+	return result
+}
+
+// ScanUint32 scans a 32-bit unsigned integer at the specified offset.
+func (b *SerializationBuffer) scanUint32(offset int) uint32 {
+	bytes := b.array[offset : offset+4]
+	return binary.LittleEndian.Uint32(bytes)
+}
+
+// ReadVarInt reads a variable-length integer.
+func (b *SerializationBuffer) ReadVarInt() int {
+	var result int
+	var shift uint
+
+	for {
+		byteVal := b.ReadByte()
+		result += int(byteVal&0x7f) << shift
+		shift += 7
+
+		if (byteVal & 0x80) == 0 {
+			break
+		}
+	}
+
+	return result
+}
+
+// ReadLocation reads a location from the buffer.
+func (b *SerializationBuffer) ReadLocation() Location {
+	return Location{
+		StartOffset: b.ReadVarInt(),
+		Length:      b.ReadVarInt(),
+	}
+}
+
+// ReadOptionalLocation reads an optional location from the buffer.
+func (b *SerializationBuffer) ReadOptionalLocation() *Location {
+	if b.ReadByte() != 0 {
+		loc := b.ReadLocation()
+		return &loc
+	}
+	return nil
+}
+
+// ReadStringField reads a string field with encoding flags.
+func (b *SerializationBuffer) ReadStringField(flags uint32) RubyString {
+	stringType := b.ReadByte()
+
+	switch stringType {
+	case 1:
+		startOffset := b.ReadVarInt()
+		length := b.ReadVarInt()
+		return b.decodeString(b.source[startOffset:startOffset+length], flags)
+	case 2:
+		length := b.ReadVarInt()
+		return b.decodeString(b.ReadBytes(length), flags)
+	default:
+		panic(fmt.Sprintf("Unknown serialized string type: %d", stringType))
+	}
+}
+
+// ScanConstant scans a constant from the constant pool.
+func (b *SerializationBuffer) ScanConstant(constantPoolOffset int, constantIndex int) string {
+	offset := constantPoolOffset + constantIndex*8
+	startOffset := int(b.scanUint32(offset))
+	length := int(b.scanUint32(offset + 4))
+
+	if startOffset&(1<<31) != 0 {
+		startOffset &= (1 << 31) - 1
+		return string(b.array[startOffset : startOffset+length])
+	} else {
+		return string(b.source[startOffset : startOffset+length])
+	}
+}
+
+// ReadDouble reads a double-precision floating point number.
+func (b *SerializationBuffer) ReadDouble() float64 {
+	bytes := b.ReadBytes(8)
+	bits := binary.LittleEndian.Uint64(bytes)
+	return *(*float64)(unsafe.Pointer(&bits))
+}
+
+// decodeString decodes a byte slice into a RubyString based on encoding flags.
+func (b *SerializationBuffer) decodeString(bytes []byte, flags uint32) RubyString {
+	forcedBin := (flags & forcedBinaryEncodingFlag) != 0
+	forcedUtf8 := (flags & forcedUTF8EncodingFlag) != 0
+
+	if forcedBin {
+		return RubyString{
+			Encoding:      "ascii",
+			ValidEncoding: true,
+			Value:         string(bytes),
+		}
+	}
+
+	encoding := b.fileEncoding
+	if forcedUtf8 {
+		encoding = "utf-8"
+	}
+
+	if encoding == "utf-8" {
+		if utf8.Valid(bytes) {
+			return RubyString{
+				Encoding:      encoding,
+				ValidEncoding: true,
+				Value:         string(bytes),
+			}
+		} else {
+			return RubyString{
+				Encoding:      encoding,
+				ValidEncoding: false,
+				Value:         string(bytes),
+			}
+		}
+	}
+
+	// For other encodings, assume they're valid for now
+	return RubyString{
+		Encoding:      encoding,
+		ValidEncoding: true,
+		Value:         string(bytes),
+	}
+}
+
+var errorLevels = []string{"syntax", "argument", "load"}
+var errorTypes = []string{
+<%- errors.each do |error| -%>
+	"<%= error.name.downcase %>",
+<%- end -%>
+}
+
+var warningLevels = []string{"default", "verbose"}
+var warningTypes = []string{
+<%- warnings.each do |warning| -%>
+	"<%= warning.name.downcase %>",
+<%- end -%>
+}
+
+// Deserialize accepts two byte slices, one for the source and one for the serialized format.
+// Returns the AST corresponding to the serialized form.
+func Deserialize(source, array []byte) (*ParseResult, error) {
+	buffer := NewSerializationBuffer(source, array)
+
+	// Check magic header
+	if buffer.ReadString(5, 0) != "PRISM" {
+		return nil, errors.New("invalid serialization")
+	}
+
+	// Check version
+	if buffer.ReadByte() != majorVersion || buffer.ReadByte() != minorVersion || buffer.ReadByte() != patchVersion {
+		return nil, errors.New("invalid serialization")
+	}
+
+	// Check location fields flag
+	if buffer.ReadByte() != 0 {
+		return nil, errors.New("invalid serialization (location fields must be included but are not)")
+	}
+
+	// Read file encoding
+	encodingLength := buffer.ReadVarInt()
+	buffer.fileEncoding = buffer.ReadString(encodingLength, 0)
+
+	// Skip start line
+	buffer.ReadVarInt()
+
+	// Skip line offsets
+	lineOffsetsCount := buffer.ReadVarInt()
+	for i := 0; i < lineOffsetsCount; i++ {
+		buffer.ReadVarInt()
+	}
+
+	// Read comments
+	commentsCount := buffer.ReadVarInt()
+	comments := make([]Comment, commentsCount)
+	for i := 0; i < commentsCount; i++ {
+		comments[i] = Comment{
+			Type:     buffer.ReadVarInt(),
+			Location: buffer.ReadLocation(),
+		}
+	}
+
+	// Read magic comments
+	magicCommentsCount := buffer.ReadVarInt()
+	magicComments := make([]MagicComment, magicCommentsCount)
+	for i := 0; i < magicCommentsCount; i++ {
+		magicComments[i] = MagicComment{
+			StartLocation: buffer.ReadLocation(),
+			EndLocation:   buffer.ReadLocation(),
+		}
+	}
+
+	// Read data location
+	dataLoc := buffer.ReadOptionalLocation()
+
+	// Read errors
+	errorsCount := buffer.ReadVarInt()
+	errors := make([]ParseError, errorsCount)
+	for i := 0; i < errorsCount; i++ {
+		errorType := buffer.ReadVarInt()
+		messageLength := buffer.ReadVarInt()
+		message := buffer.ReadString(messageLength, 0)
+		location := buffer.ReadLocation()
+		level := buffer.ReadByte()
+
+		errors[i] = ParseError{
+			Type:     errorTypes[errorType],
+			Message:  message,
+			Location: location,
+			Level:    errorLevels[level],
+		}
+	}
+
+	// Read warnings
+	warningsCount := buffer.ReadVarInt()
+	warnings := make([]ParseWarning, warningsCount)
+	for i := 0; i < warningsCount; i++ {
+		warningType := buffer.ReadVarInt()
+		messageLength := buffer.ReadVarInt()
+		message := buffer.ReadString(messageLength, 0)
+		location := buffer.ReadLocation()
+		level := buffer.ReadByte()
+
+		warnings[i] = ParseWarning{
+			Type:     warningTypes[warningType],
+			Message:  message,
+			Location: location,
+			Level:    warningLevels[level],
+		}
+	}
+
+	constantPoolOffset := int(buffer.ReadUint32())
+	constantsCount := buffer.ReadVarInt()
+	constants := make([]*string, constantsCount)
+
+	readRequiredNode := func() Node {
+		return readRequiredNodeImpl(buffer, constants, constantPoolOffset)
+	}
+
+	value := readRequiredNode().(*ProgramNode)
+
+	return &ParseResult{
+		Value:         value,
+		Comments:      comments,
+		MagicComments: magicComments,
+		DataLoc:       dataLoc,
+		Errors:        errors,
+		Warnings:      warnings,
+	}, nil
+}
+
+func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, constantPoolOffset int) Node {
+	nodeType := buffer.ReadByte()
+	nodeID := buffer.ReadVarInt()
+	location := buffer.ReadLocation()
+
+	readRequiredNode := func() Node {
+		return readRequiredNodeImpl(buffer, constants, constantPoolOffset)
+	}
+
+	readOptionalNode := func() Node {
+		if buffer.ReadByte() != 0 {
+			buffer.index--
+			return readRequiredNode()
+		}
+		return nil
+	}
+
+	scanConstant := func(constantIndex int) string {
+		if constants[constantIndex] == nil {
+			value := buffer.ScanConstant(constantPoolOffset, constantIndex)
+			constants[constantIndex] = &value
+		}
+		return *constants[constantIndex]
+	}
+
+	readRequiredConstant := func() string {
+		return scanConstant(buffer.ReadVarInt() - 1)
+	}
+
+	readOptionalConstant := func() *string {
+		index := buffer.ReadVarInt()
+		if index == 0 {
+			return nil
+		}
+		result := scanConstant(index - 1)
+		return &result
+	}
+
+	readInteger := func() int64 {
+		negative := buffer.ReadByte() != 0
+		length := buffer.ReadVarInt()
+
+		firstWord := uint64(buffer.ReadVarInt())
+		if length == 1 {
+			if negative && firstWord >= 0x80000000 {
+				return -int64(firstWord)
+			} else if negative {
+				return -int64(firstWord)
+			} else {
+				return int64(firstWord)
+			}
+		}
+
+		result := big.NewInt(0).SetUint64(firstWord)
+		for i := 1; i < length; i++ {
+			word := big.NewInt(0).SetUint64(uint64(buffer.ReadVarInt()))
+			word.Lsh(word, uint(i*32))
+			result.Or(result, word)
+		}
+
+		if negative {
+			result.Neg(result)
+		}
+		return result.Int64()
+	}
+
+	var flags uint32
+
+	switch nodeType {
+<%- nodes.each.with_index(1) do |node, index| -%>
+	case <%= index %>:
+		<%- if node.needs_serialized_length? -%>
+		buffer.ReadUint32() // skip serialized length
+		<%- end -%>
+		flags = uint32(buffer.ReadVarInt())
+		return New<%= node.name %>(<%- params = ["nodeID", "location", "flags"] + node.fields.map { |field|
+			case field
+			when Prism::Template::NodeField then
+				if field.ruby_type == "Node"
+					"readRequiredNode()"
+				else
+					"readRequiredNode().(*#{field.ruby_type})"
+				end
+			when Prism::Template::OptionalNodeField then
+				if field.ruby_type == "Node"
+					"func() #{field.ruby_type} { if n := readOptionalNode(); n != nil { return n.(#{field.ruby_type}) }; return nil }()"
+				else
+					"func() *#{field.ruby_type} { if n := readOptionalNode(); n != nil { return n.(*#{field.ruby_type}) }; return nil }()"
+				end
+			when Prism::Template::StringField then "buffer.ReadStringField(flags)"
+			when Prism::Template::NodeListField then "func() []Node { count := buffer.ReadVarInt(); nodes := make([]Node, count); for i := 0; i < count; i++ { nodes[i] = readRequiredNode() }; return nodes }()"
+			when Prism::Template::ConstantField then "readRequiredConstant()"
+			when Prism::Template::OptionalConstantField then "readOptionalConstant()"
+			when Prism::Template::ConstantListField then "func() []string { count := buffer.ReadVarInt(); result := make([]string, count); for i := 0; i < count; i++ { result[i] = readRequiredConstant() }; return result }()"
+			when Prism::Template::LocationField then "buffer.ReadLocation()"
+			when Prism::Template::OptionalLocationField then "buffer.ReadOptionalLocation()"
+			when Prism::Template::UInt8Field then "buffer.ReadByte()"
+			when Prism::Template::UInt32Field then "uint32(buffer.ReadVarInt())"
+			when Prism::Template::IntegerField then "readInteger()"
+			when Prism::Template::DoubleField then "buffer.ReadDouble()"
+			end
+		} -%><%= params.join(", ") %>)
+<%- end -%>
+	default:
+		panic(fmt.Sprintf("Unknown node type: %d", nodeType))
+	}
+}

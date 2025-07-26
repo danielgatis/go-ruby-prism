@@ -32,6 +32,7 @@ func NewParser(ctx context.Context, options ...ParserOption) (*Parser, error) {
 
 	parser := &Parser{
 		runtime: runtime,
+		logger:  NewNullLogger(),
 	}
 
 	for _, opt := range options {
@@ -164,7 +165,7 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 		return nil, fmt.Errorf("failed to read the buffer content from memory: %w", err)
 	}
 
-	result, err = load(serializedBytes, source, p.logger)
+	result, err = Deserialize(source, serializedBytes)
 	p.logger.Debug("result: %v", result)
 
 	if err != nil {
