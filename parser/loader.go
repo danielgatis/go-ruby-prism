@@ -14,9 +14,11 @@ const majorVersion = 1
 const minorVersion = 3
 const patchVersion = 0
 
-func load(serialized []byte, source []byte) (*ParseResult, error) {
+func load(serialized []byte, source []byte, logger Logger) (*ParseResult, error) {
 	buff := NewSeekableBuffer(serialized)
 	src := NewSource(source)
+
+	logger.Debug("buff: %v", buff)
 
 	// check header
 	header := make([]byte, 5)
@@ -25,12 +27,16 @@ func load(serialized []byte, source []byte) (*ParseResult, error) {
 		return nil, fmt.Errorf("error reading header: %w", err)
 	}
 
+	logger.Debug("header: %v", header)
+
 	if !bytes.Equal(header, []byte(prismHeader)) {
 		return nil, fmt.Errorf("invalid prism header")
 	}
 
 	// check version
 	version := make([]byte, 3)
+	logger.Debug("version: %v", version)
+
 	_, err = buff.Read(version)
 	if err != nil {
 		return nil, fmt.Errorf("error reading version: %w", err)
@@ -42,6 +48,8 @@ func load(serialized []byte, source []byte) (*ParseResult, error) {
 
 	// check location
 	var location = make([]byte, 1)
+	logger.Debug("location: %v", location)
+
 	_, err = buff.Read(location)
 	if err != nil {
 		return nil, fmt.Errorf("error reading location: %w", err)
@@ -53,20 +61,25 @@ func load(serialized []byte, source []byte) (*ParseResult, error) {
 
 	// load the encoding
 	encodingLength, err := loadVarUInt(buff)
+	logger.Debug("encodingLength: %v", encodingLength)
 	if err != nil {
 		return nil, fmt.Errorf("error reading encoding length: %w", err)
 	}
 
 	encodingNameBytes := make([]byte, encodingLength)
+	logger.Debug("encodingNameBytes: %v", string(encodingNameBytes))
 	if _, err := buff.Read(encodingNameBytes); err != nil {
 		return nil, fmt.Errorf("error reading encoding name: %w", err)
 	}
 
 	encodingName := string(encodingNameBytes)
 	encodingCharset := getEncodingCharset(encodingName)
+	logger.Debug("encodingCharset: %v", encodingCharset)
 
 	// load the source start line
 	startLine, err := loadVarSInt(buff)
+	logger.Debug("startLine: %v", startLine)
+
 	if err != nil {
 		return nil, fmt.Errorf("error reading start line: %w", err)
 	}
@@ -75,6 +88,8 @@ func load(serialized []byte, source []byte) (*ParseResult, error) {
 
 	// load the source line offsets
 	lineOffsets, err := loadLineOffsets(buff)
+	logger.Debug("lineOffsets: %v", lineOffsets)
+
 	if err != nil {
 		return nil, fmt.Errorf("error reading line offsets: %w", err)
 	}
@@ -83,36 +98,45 @@ func load(serialized []byte, source []byte) (*ParseResult, error) {
 
 	// load the comments
 	comments, err := loadComments(buff)
+	logger.Debug("comments: %v", comments)
+
 	if err != nil {
 		return nil, fmt.Errorf("error reading comments: %w", err)
 	}
 
 	// load the magic comments
 	magicComments, err := loadMagicComments(buff)
+	logger.Debug("magicComments: %v", magicComments)
 	if err != nil {
 		return nil, fmt.Errorf("error reading magic comments: %w", err)
 	}
 
 	// load the data location
 	dataLocation, err := loadOptionalLocation(buff)
+	logger.Debug("dataLocation: %v", dataLocation)
+
 	if err != nil {
 		return nil, fmt.Errorf("error reading data location: %w", err)
 	}
 
 	// load errors
 	errors, err := loadErrors(buff)
+	logger.Debug("errors: %v", errors)
 	if err != nil {
 		return nil, fmt.Errorf("error reading errors: %w", err)
 	}
 
 	// load warnings
 	warnings, err := loadWarnings(buff)
+	logger.Debug("warnings: %v", warnings)
+
 	if err != nil {
 		return nil, fmt.Errorf("error reading warnings: %w", err)
 	}
 
 	// load constant pool
 	constantPool, err := loadConstantPool(buff, source, encodingCharset)
+	logger.Debug("constantPool: %v", constantPool)
 	if err != nil {
 		return nil, fmt.Errorf("error reading constant pool: %w", err)
 	}
@@ -121,7 +145,9 @@ func load(serialized []byte, source []byte) (*ParseResult, error) {
 	var node Node
 
 	if len(errors) == 0 {
-		n, err := loadNode(buff, source, constantPool)
+		n, err := loadNode(buff, source, constantPool, logger)
+		logger.Debug("node: %v", n)
+
 		if err != nil {
 			return nil, fmt.Errorf("error reading node: %w", err)
 		}
@@ -227,7 +253,7 @@ func loadLineOffsets(buff *SeekableBuffer) ([]int, error) {
 	lineOffsets := make([]int, count)
 
 	// Read each line offset
-	for i := 0; i < count; i++ {
+	for i := range count {
 		lineOffset, err := loadVarUInt(buff)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read line offset at index %d: %w", i, err)
@@ -308,7 +334,7 @@ func loadMagicComments(buff *SeekableBuffer) ([]*MagicComment, error) {
 	magicComments := make([]*MagicComment, count)
 
 	// Read each magic comment
-	for i := 0; i < count; i++ {
+	for i := range count {
 		keyLocation, err := loadLocation(buff)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read key location at index %d: %w", i, err)
@@ -334,7 +360,7 @@ func loadErrors(buff *SeekableBuffer) ([]*Error, error) {
 
 	errors := make([]*Error, count)
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		errType, err := loadVarUInt(buff)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read error type at index %d: %w", i, err)
@@ -369,7 +395,7 @@ func loadWarnings(buff *SeekableBuffer) ([]*Warning, error) {
 
 	warnings := make([]*Warning, count)
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		warningType, err := loadVarUInt(buff)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read warning type at index %d: %w", i, err)
@@ -510,7 +536,7 @@ func loadConstants(buff *SeekableBuffer, constantPool *ConstantPool) ([]string, 
 
 	constants := make([]string, length)
 
-	for i := 0; i < length; i++ {
+	for i := range length {
 		constant, err := loadConstant(buff, constantPool)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read constant at index %d: %w", i, err)
@@ -585,9 +611,9 @@ func loadDouble(buff *SeekableBuffer) (float64, error) {
 	return float, nil
 }
 
-func loadOptionalNode(buff *SeekableBuffer, source []byte, constantPool *ConstantPool) (Node, error) {
+func loadOptionalNode(buff *SeekableBuffer, source []byte, constantPool *ConstantPool, logger Logger) (Node, error) {
 	if buff.Get(buff.Position()) != 0 {
-		node, err := loadNode(buff, source, constantPool)
+		node, err := loadNode(buff, source, constantPool, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load node: %w", err)
 

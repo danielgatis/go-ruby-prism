@@ -32,7 +32,7 @@ func (v *visitor) traverse(node parser.Node) {
 func main() {
 	ctx := context.Background()
 
-	p, _ := parser.NewParser(ctx)
+	p, _ := parser.NewParser(ctx, parser.WithLogger(parser.NewDefaultLogger()))
 	defer p.Close(ctx)
 
 	source := "puts 'Hello, World!'"

@@ -21,17 +21,24 @@ type Parser struct {
 	mainScript          bool
 	partialScript       bool
 	scopes              [][][]byte
+	logger              Logger
 }
 
-func NewParser(ctx context.Context) (*Parser, error) {
+func NewParser(ctx context.Context, options ...ParserOption) (*Parser, error) {
 	runtime, err := wasm.NewRuntime(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate wasm runtime: %w", err)
 	}
 
-	return &Parser{
+	parser := &Parser{
 		runtime: runtime,
-	}, nil
+	}
+
+	for _, opt := range options {
+		opt(parser)
+	}
+
+	return parser, nil
 }
 
 func (p *Parser) Close(ctx context.Context) error {
@@ -45,7 +52,7 @@ func (p *Parser) Close(ctx context.Context) error {
 	return nil
 }
 
-func (p *Parser) Parse(ctx context.Context, source []byte, options ...ParserOption) (result *ParseResult, err error) {
+func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult, err error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
@@ -60,6 +67,8 @@ func (p *Parser) Parse(ctx context.Context, source []byte, options ...ParserOpti
 	}()
 
 	sourcePtr, err := p.runtime.Calloc(ctx, 1, uint64(len(source)))
+	p.logger.Debug("sourcePtr: %v", sourcePtr)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate memory for source: %w", err)
 	}
@@ -68,10 +77,17 @@ func (p *Parser) Parse(ctx context.Context, source []byte, options ...ParserOpti
 		return nil, fmt.Errorf("failed to write the source into memory: %w", err)
 	}
 
-	// put option into memory
-	for _, opt := range options {
-		opt(p)
-	}
+	p.logger.Debug("source: %v", source)
+	p.logger.Debug("filepath: %v", p.filepath)
+	p.logger.Debug("line: %v", p.line)
+	p.logger.Debug("encoding: %v", p.encoding)
+	p.logger.Debug("frozenStringLiteral: %v", p.frozenStringLiteral)
+	p.logger.Debug("commandLine: %v", p.commandLine)
+	p.logger.Debug("version: %v", p.version)
+	p.logger.Debug("encodingLocked: %v", p.encodingLocked)
+	p.logger.Debug("mainScript: %v", p.mainScript)
+	p.logger.Debug("partialScript: %v", p.partialScript)
+	p.logger.Debug("scopes: %v", p.scopes)
 
 	serializedOptions, err := serializeParserOptions(
 		[]byte(p.filepath),
@@ -86,11 +102,15 @@ func (p *Parser) Parse(ctx context.Context, source []byte, options ...ParserOpti
 		p.scopes,
 	)
 
+	p.logger.Debug("serializedOptions: %v", serializedOptions)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize the parser options: %w", err)
 	}
 
 	optPtr, err := p.runtime.Calloc(ctx, 1, uint64(len(serializedOptions)))
+	p.logger.Debug("optPtr: %v", optPtr)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate memory for options: %w", err)
 	}
@@ -101,11 +121,15 @@ func (p *Parser) Parse(ctx context.Context, source []byte, options ...ParserOpti
 
 	// call the serialize parse function
 	bufferSizeOf, err := p.runtime.BufferSizeOf(ctx)
+	p.logger.Debug("bufferSizeOf: %v", bufferSizeOf)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the buffer size: %w", err)
 	}
 
 	bufferPtr, err := p.runtime.Calloc(ctx, bufferSizeOf, 1)
+	p.logger.Debug("bufferPtr: %v", bufferPtr)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the buffer ptr: %w", err)
 	}
@@ -120,21 +144,29 @@ func (p *Parser) Parse(ctx context.Context, source []byte, options ...ParserOpti
 
 	// read result from memory
 	bufferValue, err := p.runtime.BufferValue(ctx, bufferPtr)
+	p.logger.Debug("bufferValue: %v", bufferValue)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the buffer value: %w", err)
 	}
 
 	bufferLen, err := p.runtime.BufferLength(ctx, bufferPtr)
+	p.logger.Debug("bufferLen: %v", bufferLen)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the buffer length: %w", err)
 	}
 
 	serializedBytes, ok := p.runtime.MemoryRead(bufferValue, bufferLen)
+	p.logger.Debug("serializedBytes: %v", serializedBytes)
+
 	if !ok {
 		return nil, fmt.Errorf("failed to read the buffer content from memory: %w", err)
 	}
 
-	result, err = load(serializedBytes, source)
+	result, err = load(serializedBytes, source, p.logger)
+	p.logger.Debug("result: %v", result)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize the result: %w", err)
 	}
@@ -218,5 +250,11 @@ func WithPartialScript(partialScript bool) ParserOption {
 func WithScopes(scopes [][][]byte) ParserOption {
 	return func(p *Parser) {
 		p.scopes = scopes
+	}
+}
+
+func WithLogger(logger Logger) ParserOption {
+	return func(p *Parser) {
+		p.logger = logger
 	}
 }
