@@ -19,11 +19,12 @@ func NewVisitor() *visitor {
 }
 
 func (v *visitor) Visit(node parser.Node) {
-	fmt.Printf("%T\n", node)
+	fmt.Printf("🔍 Visiting node: %T\n", node)
 	v.DefaultVisitor.Visit(node)
 }
 
 func (v *visitor) Traverse(node parser.Node) {
+	fmt.Printf("🌲 Traversing node: %T\n", node)
 	v.Visit(node)
 	for _, child := range node.ChildNodes() {
 		v.Traverse(child)
@@ -33,16 +34,21 @@ func (v *visitor) Traverse(node parser.Node) {
 func main() {
 	ctx := context.Background()
 
+	fmt.Println("🚀 Starting Ruby AST traversal with Visitor pattern...")
+
 	p, _ := parser.NewParser(ctx)
 	defer p.Close(ctx)
 
 	source := "puts 'Hello, World!'"
+	fmt.Printf("💡 Parsing source: %s\n", source)
 	result, err := p.Parse(ctx, []byte(source))
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("❌ Error parsing Ruby code:", err)
 		os.Exit(1)
 	}
 
+	fmt.Println("🧭 Beginning AST traversal...")
 	visitor := NewVisitor()
 	visitor.Traverse(result.Value)
+	fmt.Println("✅ AST traversal complete!")
 }

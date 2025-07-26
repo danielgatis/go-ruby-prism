@@ -19,7 +19,7 @@ import (
 
 const (
 	majorVersion = 1
-	minorVersion = 3
+	minorVersion = 4
 	patchVersion = 0
 )
 

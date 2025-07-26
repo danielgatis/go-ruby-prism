@@ -3,7 +3,6 @@ package main
 import (
 	"archive/zip"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,38 +27,38 @@ func main() {
 	unzippedPath := filepath.Join(outputDir, railsFolderName)
 
 	if fileExists(zipPath) {
-		fmt.Println("Rails source code zip already exists. Skipping download.")
+		fmt.Println("📦 Rails source code zip already exists. Skipping download.")
 	} else {
-		fmt.Println("Downloading Rails source code...")
+		fmt.Println("⬇️ Downloading Rails source code...")
 		if err := downloadFile(ctx, railsRepoZipURL, zipPath); err != nil {
-			fmt.Println("Error downloading Rails source code:", err)
+			fmt.Println("❌ Error downloading Rails source code:", err)
 			return
 		}
-		fmt.Println("Rails source code downloaded to", zipPath)
+		fmt.Println("✅ Rails source code downloaded to", zipPath)
 	}
 
 	// Step 2: Unzip the Rails folder if not already unzipped
 	if dirExists(unzippedPath) {
-		fmt.Println("Rails source code already unzipped. Skipping extraction.")
+		fmt.Println("🗂️ Rails source code already unzipped. Skipping extraction.")
 	} else {
-		fmt.Println("Unzipping Rails source code...")
+		fmt.Println("🗜️ Unzipping Rails source code...")
 		if err := unzip(zipPath, outputDir); err != nil {
-			fmt.Println("Error unzipping Rails source code:", err)
+			fmt.Println("❌ Error unzipping Rails source code:", err)
 			return
 		}
-		fmt.Println("Rails source code unzipped to", unzippedPath)
+		fmt.Println("✅ Rails source code unzipped to", unzippedPath)
 
 		// Remove the zip file after unzipping
 		if err := os.Remove(zipPath); err != nil {
-			fmt.Println("Error removing zip file:", err)
+			fmt.Println("⚠️ Error removing zip file:", err)
 			return
 		}
-		fmt.Println("Zip file removed:", zipPath)
+		fmt.Println("🗑️ Zip file removed:", zipPath)
 	}
 
 	// Step 3: Iterate over all Ruby files in the Rails folder
 	if err := iterateRubyFiles(unzippedPath); err != nil {
-		fmt.Println("Error iterating Ruby files:", err)
+		fmt.Println("❌ Error iterating Ruby files:", err)
 	}
 }
 
@@ -115,7 +114,7 @@ func unzip(src, dest string) error {
 		if file.FileInfo().IsDir() {
 			err := os.MkdirAll(fpath, os.ModePerm)
 			if err != nil {
-				fmt.Println(err)
+				fmt.Println("⚠️", err)
 			}
 
 			continue
@@ -161,20 +160,16 @@ func iterateRubyFiles(dir string) error {
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".rb") {
 			source, err := readFileContent(path)
 			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
+				fmt.Printf("📄 Ruby file read: %s failed\n", path)
+				return nil
 			}
 
-			result, err := p.Parse(ctx, source)
+			_, err = p.Parse(ctx, source)
 			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
+				fmt.Printf("💥 %s \n", path)
+			} else {
+				fmt.Printf("✨ %s \n", path)
 			}
-
-			jsonResult, _ := json.MarshalIndent(result, "", "  ")
-			fmt.Println("Ruby file found:", path)
-			fmt.Println("Ruby parse result:", string(jsonResult))
-			fmt.Println("--")
 		}
 		return nil
 	})
