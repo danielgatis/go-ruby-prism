@@ -20,7 +20,7 @@ format:
 
 wasm_build:
 		@echo "Building wasm"
-		rm -fr prism/java-wasm/src/test/resources/prism.wasm
+		rm -fr prism/javascript/src/prism.wasm
 
 		cd prism && bundle install
 		cd prism && bundle exec rake compile
