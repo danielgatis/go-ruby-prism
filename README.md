@@ -356,8 +356,7 @@ go-ruby-prism/
 │   └── parsing_options.go   # Configuration options
 ├── prism/                   # Ruby Prism submodule
 ├── wasm/                    # WebAssembly runtime
-├── templates/               # Code generation templates
-└── test/                    # Tests and fixtures
+└── templates/               # Code generation templates
 ```
 
 ## Build and Development
