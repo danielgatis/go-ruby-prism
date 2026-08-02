@@ -1,0 +1,122 @@
+package parser
+{{range $flag := .Flags}}
+// {{$flag.Comment}}
+const (
+{{- range $index, $value := $flag.Values}}
+	{{camelcase $flag.Name}}{{camelcase $value.Name}} = 1 << {{flagBit $index}}
+{{- end}}
+)
+{{- end}}
+
+// Location represents a location in the source code.
+type Location struct {
+	StartOffset int `json:"startOffset"`
+	Length      int `json:"length"`
+}
+
+// RubyString represents an encoded Ruby string.
+type RubyString struct {
+	Value         string `json:"value"`
+	Encoding      string `json:"encoding"`
+	ValidEncoding bool   `json:"validEncoding"`
+}
+
+// Node represents a generic node in the tree.
+type Node interface {
+	Accept(visitor Visitor)
+	ChildNodes() []Node
+	CompactChildNodes() []Node
+	ToJSON() map[string]interface{}
+	GetLocation() Location
+	GetNodeID() int
+}
+{{range .Nodes}}
+{{range commentLines .Comment}}//{{.}}
+{{end -}}
+type {{.Name}} struct {
+	NodeID   int      `json:"nodeID"`
+	Location Location `json:"location"`
+	flags    uint32
+{{- range .Fields}}
+	{{.GoProp}} {{.GoType}} `json:"{{.GoName}}"`
+{{- end}}
+}
+
+// New{{.Name}} creates a new {{.Name}}.
+func New{{.Name}}(nodeID int, location Location, flags uint32{{range .Fields}}, {{.GoName}} {{.GoType}}{{end}}) *{{.Name}} {
+	return &{{.Name}}{
+		NodeID:   nodeID,
+		Location: location,
+		flags:    flags,
+{{- range .Fields}}
+		{{.GoProp}}: {{.GoName}},
+{{- end}}
+	}
+}
+
+// GetLocation returns the location of this node.
+func (n *{{.Name}}) GetLocation() Location {
+	return n.Location
+}
+
+// GetNodeID returns the node ID of this node.
+func (n *{{.Name}}) GetNodeID() int {
+	return n.NodeID
+}
+
+{{if .FlagSet}}{{$node := .}}{{range .FlagSet.Values}}// Is{{camelcase .Name}} returns true if this node has the {{camelcase .Name}} flag.
+func (n *{{$node.Name}}) Is{{camelcase .Name}}() bool {
+	return (n.flags & {{camelcase $node.FlagSet.Name}}{{camelcase .Name}}) != 0
+}
+
+{{end}}{{end}}// Accept calls the appropriate visit method on the visitor.
+func (n *{{.Name}}) Accept(visitor Visitor) {
+	visitor.Visit{{.Name}}(n)
+}
+
+// ChildNodes returns all child nodes of the current node.
+func (n *{{.Name}}) ChildNodes() []Node {
+	nodes := []Node{}
+{{- range .Fields}}
+{{- if eq .Type "node"}}
+	nodes = append(nodes, n.{{.GoProp}})
+{{- else if eq .Type "node?"}}
+	if n.{{.GoProp}} != nil {
+		nodes = append(nodes, n.{{.GoProp}})
+	}
+{{- else if eq .Type "node[]"}}
+	nodes = append(nodes, n.{{.GoProp}}...)
+{{- end}}
+{{- end}}
+	return nodes
+}
+
+// CompactChildNodes returns all non-nil child nodes.
+func (n *{{.Name}}) CompactChildNodes() []Node {
+	nodes := []Node{}
+{{- range .Fields}}
+{{- if eq .Type "node"}}
+	nodes = append(nodes, n.{{.GoProp}})
+{{- else if eq .Type "node?"}}
+	if n.{{.GoProp}} != nil {
+		nodes = append(nodes, n.{{.GoProp}})
+	}
+{{- else if eq .Type "node[]"}}
+	nodes = append(nodes, n.{{.GoProp}}...)
+{{- end}}
+{{- end}}
+	return nodes
+}
+
+// ToJSON converts the node to a JSON-serializable map.
+func (n *{{.Name}}) ToJSON() map[string]interface{} {
+	return map[string]interface{}{
+		"type":     "{{.Name}}",
+		"location": n.Location,
+		"flags":    n.flags,
+{{- range .Fields}}
+		"{{.GoName}}": n.{{.GoProp}},
+{{- end}}
+	}
+}
+{{end}}

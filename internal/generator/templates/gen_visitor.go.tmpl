@@ -37,12 +37,10 @@ type BasicVisitor interface {
 //	}
 type Visitor interface {
 	BasicVisitor
-<%- nodes.each do |node| -%>
-
-	// Visit<%= node.name %> visits a <%= node.name %> node.
-	Visit<%= node.name %>(node *<%= node.name %>)
-<%- end -%>
-}
+{{range .Nodes}}
+	// Visit{{.Name}} visits a {{.Name}} node.
+	Visit{{.Name}}(node *{{.Name}})
+{{end}}}
 
 // DefaultVisitor provides a default implementation of the Visitor interface
 // that simply continues walking the tree by visiting child nodes.
@@ -71,10 +69,9 @@ func (v *DefaultVisitor) VisitChildNodes(node Node) {
 	}
 }
 
-<%- nodes.each do |node| -%>
-
-// Visit<%= node.name %> visits a <%= node.name %> node.
-func (v *DefaultVisitor) Visit<%= node.name %>(node *<%= node.name %>) {
+{{range .Nodes}}
+// Visit{{.Name}} visits a {{.Name}} node.
+func (v *DefaultVisitor) Visit{{.Name}}(node *{{.Name}}) {
 	v.VisitChildNodes(node)
 }
-<%- end -%>
+{{end}}
