@@ -1,0 +1,190 @@
+package parser
+
+import (
+	"reflect"
+	"testing"
+)
+
+// allNodeTypes lists every node type in config.yml. It exists so that a node
+// added upstream cannot land without being covered by the checks below.
+var allNodeTypes = []struct {
+	name string
+	typ  reflect.Type
+}{
+{{- range .Nodes}}
+	{"{{.Name}}", reflect.TypeOf((*{{.Name}})(nil))},
+{{- end}}
+}
+
+// TestNodeCount fails when the generated node set changes size, which makes a
+// prism upgrade state its impact explicitly.
+func TestNodeCount(t *testing.T) {
+	if got, want := len(allNodeTypes), {{len .Nodes}}; got != want {
+		t.Fatalf("node count = %d, want %d", got, want)
+	}
+}
+
+// TestNodesImplementNode checks that every generated node satisfies the Node
+// interface, including the methods a visitor relies on.
+func TestNodesImplementNode(t *testing.T) {
+	nodeInterface := reflect.TypeOf((*Node)(nil)).Elem()
+
+	for _, entry := range allNodeTypes {
+		if !entry.typ.Implements(nodeInterface) {
+			t.Errorf("%s does not implement Node", entry.name)
+		}
+	}
+}
+
+// TestNodeFields checks that each node carries the fields declared in
+// config.yml, with the expected Go type and JSON tag.
+func TestNodeFields(t *testing.T) {
+	cases := []struct {
+		node    string
+		field   string
+		typ     string
+		jsonTag string
+	}{
+{{- range $node := .Nodes}}
+{{- range $node.Fields}}
+		{"{{$node.Name}}", "{{.GoProp}}", "{{.GoType}}", "{{.GoName}}"},
+{{- end}}
+{{- end}}
+	}
+
+	byName := make(map[string]reflect.Type, len(allNodeTypes))
+	for _, entry := range allNodeTypes {
+		byName[entry.name] = entry.typ.Elem()
+	}
+
+	for _, tc := range cases {
+		structType, ok := byName[tc.node]
+		if !ok {
+			t.Errorf("unknown node %s", tc.node)
+			continue
+		}
+
+		field, ok := structType.FieldByName(tc.field)
+		if !ok {
+			t.Errorf("%s: missing field %s", tc.node, tc.field)
+			continue
+		}
+
+		// Generated types are referenced without a package qualifier
+		// inside this package, so compare against the unqualified name.
+		if got := unqualified(field.Type.String()); got != tc.typ {
+			t.Errorf("%s.%s: type = %s, want %s", tc.node, tc.field, got, tc.typ)
+		}
+
+		if got := field.Tag.Get("json"); got != tc.jsonTag {
+			t.Errorf("%s.%s: json tag = %q, want %q", tc.node, tc.field, got, tc.jsonTag)
+		}
+	}
+}
+
+// TestOptionalFieldsAreNilable checks that every optional field is declared as
+// a type that can hold nil, so an absent value is representable.
+func TestOptionalFieldsAreNilable(t *testing.T) {
+	cases := []struct {
+		node  string
+		field string
+	}{
+{{- range $node := .Nodes}}
+{{- range $node.Fields}}
+{{- if or (eq .Type "node?") (eq .Type "constant?") (eq .Type "location?")}}
+		{"{{$node.Name}}", "{{.GoProp}}"},
+{{- end}}
+{{- end}}
+{{- end}}
+	}
+
+	byName := make(map[string]reflect.Type, len(allNodeTypes))
+	for _, entry := range allNodeTypes {
+		byName[entry.name] = entry.typ.Elem()
+	}
+
+	for _, tc := range cases {
+		field, ok := byName[tc.node].FieldByName(tc.field)
+		if !ok {
+			t.Errorf("%s: missing field %s", tc.node, tc.field)
+			continue
+		}
+
+		switch field.Type.Kind() {
+		case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map:
+		default:
+			t.Errorf("%s.%s: optional field has non-nilable type %s", tc.node, tc.field, field.Type)
+		}
+	}
+}
+
+// TestFlagBits checks that each flag constant occupies the bit position
+// config.yml assigns it, offset past the common flags.
+func TestFlagBits(t *testing.T) {
+	cases := []struct {
+		name string
+		got  int
+		want int
+	}{
+{{- range $flag := .Flags}}
+{{- range $index, $value := $flag.Values}}
+		{"{{camelcase $flag.Name}}{{camelcase $value.Name}}", {{camelcase $flag.Name}}{{camelcase $value.Name}}, 1 << {{flagBit $index}}},
+{{- end}}
+{{- end}}
+	}
+
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s = %d, want %d", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+// TestErrorAndWarningTypes checks that the diagnostic tables line up with
+// config.yml, since they are indexed positionally during deserialization.
+func TestErrorAndWarningTypes(t *testing.T) {
+	if got, want := len(errorTypes), {{len .Errors}}; got != want {
+		t.Errorf("errorTypes length = %d, want %d", got, want)
+	}
+
+	if got, want := len(warningTypes), {{len .Warnings}}; got != want {
+		t.Errorf("warningTypes length = %d, want %d", got, want)
+	}
+
+	seen := make(map[string]bool, len(errorTypes))
+	for _, name := range errorTypes {
+		if seen[name] {
+			t.Errorf("duplicate error type %q", name)
+		}
+
+		seen[name] = true
+	}
+
+	seen = make(map[string]bool, len(warningTypes))
+	for _, name := range warningTypes {
+		if seen[name] {
+			t.Errorf("duplicate warning type %q", name)
+		}
+
+		seen[name] = true
+	}
+}
+
+// unqualified strips the package qualifier that reflect includes in type
+// names, so "parser.Location" compares equal to the generated "Location".
+func unqualified(name string) string {
+	prefix := ""
+
+	for len(name) > 0 && (name[0] == '*' || name[0] == '[' || name[0] == ']') {
+		prefix += string(name[0])
+		name = name[1:]
+	}
+
+	for i := 0; i < len(name); i++ {
+		if name[i] == '.' {
+			return prefix + name[i+1:]
+		}
+	}
+
+	return prefix + name
+}

@@ -1,0 +1,117 @@
+package parser
+
+import (
+	"reflect"
+	"testing"
+)
+
+// TestVisitorCoversAllNodes checks that the Visitor interface declares a visit
+// method for every node type, and that DefaultVisitor implements all of them.
+// A node added upstream therefore cannot land without visitor support.
+func TestVisitorCoversAllNodes(t *testing.T) {
+	visitorType := reflect.TypeOf((*Visitor)(nil)).Elem()
+	defaultVisitor := reflect.TypeOf((*DefaultVisitor)(nil))
+
+	cases := []string{
+{{- range .Nodes}}
+		"Visit{{.Name}}",
+{{- end}}
+	}
+
+	for _, name := range cases {
+		method, ok := visitorType.MethodByName(name)
+		if !ok {
+			t.Errorf("Visitor is missing %s", name)
+			continue
+		}
+
+		if got := method.Type.NumIn(); got != 1 {
+			t.Errorf("Visitor.%s takes %d arguments, want 1", name, got)
+		}
+
+		if _, ok := defaultVisitor.MethodByName(name); !ok {
+			t.Errorf("DefaultVisitor is missing %s", name)
+		}
+	}
+
+	// Guard against the interface drifting ahead of the node list: the
+	// visit methods plus the three BasicVisitor methods must account for
+	// the whole interface.
+	if got, want := visitorType.NumMethod(), len(cases)+3; got != want {
+		t.Errorf("Visitor declares %d methods, want %d", got, want)
+	}
+}
+
+// TestChildNodesMatchConfig checks that ChildNodes reports exactly the fields
+// config.yml marks as child nodes, in declaration order. It builds each node
+// with zero values, so only the node-typed fields that are non-nil appear.
+func TestChildNodesMatchConfig(t *testing.T) {
+	cases := []struct {
+		name string
+		node Node
+		// want is the number of child slots that are non-nil for a node
+		// whose fields are all zero valued. Required node fields are nil
+		// interfaces at that point, so they still count as present.
+		wantChildFields []string
+	}{
+{{- range $node := .Nodes}}
+		{
+			"{{$node.Name}}",
+			&{{$node.Name}}{},
+			[]string{
+{{- range $node.Fields}}
+{{- if eq .Type "node"}}
+				"{{.GoProp}}",
+{{- end}}
+{{- end}}
+			},
+		},
+{{- end}}
+	}
+
+	for _, tc := range cases {
+		// A zero-valued node has nil optional fields and empty lists, so
+		// ChildNodes returns one entry per required node field.
+		got := tc.node.ChildNodes()
+
+		if len(got) != len(tc.wantChildFields) {
+			t.Errorf("%s: ChildNodes returned %d entries, want %d (%v)",
+				tc.name, len(got), len(tc.wantChildFields), tc.wantChildFields)
+		}
+	}
+}
+
+// TestAcceptDispatchesToMatchingMethod checks that each node's Accept calls the
+// visit method named after that node, so dispatch cannot be miswired.
+func TestAcceptDispatchesToMatchingMethod(t *testing.T) {
+	cases := []struct {
+		name string
+		node Node
+	}{
+{{- range .Nodes}}
+		{"{{.Name}}", &{{.Name}}{}},
+{{- end}}
+	}
+
+	for _, tc := range cases {
+		recorder := &recordingVisitor{}
+		tc.node.Accept(recorder)
+
+		if recorder.visited != "Visit"+tc.name {
+			t.Errorf("%s: Accept called %q, want %q", tc.name, recorder.visited, "Visit"+tc.name)
+		}
+	}
+}
+
+// recordingVisitor records which visit method was called. It embeds
+// DefaultVisitor so it satisfies the whole interface, and overrides only the
+// bookkeeping it needs.
+type recordingVisitor struct {
+	DefaultVisitor
+	visited string
+}
+
+func (v *recordingVisitor) VisitChildNodes(Node) {}
+
+{{range .Nodes}}func (v *recordingVisitor) Visit{{.Name}}(*{{.Name}}) { v.visited = "Visit{{.Name}}" }
+{{end}}

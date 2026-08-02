@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	majorVersion = 1
-	minorVersion = 4
-	patchVersion = 0
+	majorVersion = {{.Version.Major}}
+	minorVersion = {{.Version.Minor}}
+	patchVersion = {{.Version.Patch}}
 )
 
 // Comment represents a comment in the source code.
@@ -226,16 +226,14 @@ func (b *SerializationBuffer) decodeString(bytes []byte, flags uint32) RubyStrin
 
 var errorLevels = []string{"syntax", "argument", "load"}
 var errorTypes = []string{
-<%- errors.each do |error| -%>
-	"<%= error.name.downcase %>",
-<%- end -%>
+{{range .Errors}}	"{{lower .Name}}",
+{{end -}}
 }
 
 var warningLevels = []string{"default", "verbose"}
 var warningTypes = []string{
-<%- warnings.each do |warning| -%>
-	"<%= warning.name.downcase %>",
-<%- end -%>
+{{range .Warnings}}	"{{lower .Name}}",
+{{end -}}
 }
 
 // Deserialize accepts two byte slices, one for the source and one for the serialized format.
@@ -433,41 +431,11 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 	var flags uint32
 
 	switch nodeType {
-<%- nodes.each.with_index(1) do |node, index| -%>
-	case <%= index %>:
-		<%- if node.needs_serialized_length? -%>
-		buffer.ReadUint32() // skip serialized length
-		<%- end -%>
-		flags = uint32(buffer.ReadVarInt())
-		return New<%= node.name %>(<%- params = ["nodeID", "location", "flags"] + node.fields.map { |field|
-			case field
-			when Prism::Template::NodeField then
-				if field.ruby_type == "Node"
-					"readRequiredNode()"
-				else
-					"readRequiredNode().(*#{field.ruby_type})"
-				end
-			when Prism::Template::OptionalNodeField then
-				if field.ruby_type == "Node"
-					"func() #{field.ruby_type} { if n := readOptionalNode(); n != nil { return n }; return nil }()"
-				else
-					"func() *#{field.ruby_type} { if n := readOptionalNode(); n != nil { return n.(*#{field.ruby_type}) }; return nil }()"
-				end
-			when Prism::Template::StringField then "buffer.ReadStringField(flags)"
-			when Prism::Template::NodeListField then "func() []Node { count := buffer.ReadVarInt(); nodes := make([]Node, count); for i := 0; i < count; i++ { nodes[i] = readRequiredNode() }; return nodes }()"
-			when Prism::Template::ConstantField then "readRequiredConstant()"
-			when Prism::Template::OptionalConstantField then "readOptionalConstant()"
-			when Prism::Template::ConstantListField then "func() []string { count := buffer.ReadVarInt(); result := make([]string, count); for i := 0; i < count; i++ { result[i] = readRequiredConstant() }; return result }()"
-			when Prism::Template::LocationField then "buffer.ReadLocation()"
-			when Prism::Template::OptionalLocationField then "buffer.ReadOptionalLocation()"
-			when Prism::Template::UInt8Field then "buffer.ReadRawByte()"
-			when Prism::Template::UInt32Field then "uint32(buffer.ReadVarInt())"
-			when Prism::Template::IntegerField then "readInteger()"
-			when Prism::Template::DoubleField then "buffer.ReadDouble()"
-			end
-		} -%><%= params.join(", ") %>)
-<%- end -%>
-	default:
+{{range $index, $node := .Nodes}}	case {{inc $index}}:
+{{if $node.NeedsSerializedLength}}		buffer.ReadUint32() // skip serialized length
+{{end}}		flags = uint32(buffer.ReadVarInt())
+		return New{{$node.Name}}(nodeID, location, flags{{range $node.Fields}}, {{.ReadExpr}}{{end}})
+{{end}}	default:
 		panic(fmt.Sprintf("Unknown node type: %d", nodeType))
 	}
 }
