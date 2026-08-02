@@ -3,14 +3,30 @@ package parser
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/danielgatis/go-ruby-prism/wasm"
 )
 
+// Parser parses Ruby source into a syntax tree.
+//
+// A Parser owns a pool of WebAssembly instances. Each instance has its own
+// linear memory and can only run one parse at a time, so the pool size sets
+// how many parses can run concurrently. A Parser is safe for use by multiple
+// goroutines.
 type Parser struct {
-	mutex               sync.Mutex
-	runtime             *wasm.Runtime
+	// pool hands out instances. It is buffered to poolSize and is filled
+	// lazily: an empty pool with room left to grow creates a new instance
+	// rather than waiting for one to be returned.
+	pool     chan *wasm.Runtime
+	poolSize int
+
+	// mutex guards created and closed.
+	mutex   sync.Mutex
+	created int
+	closed  bool
+
 	filepath            []byte
 	line                int
 	encoding            []byte
@@ -24,39 +40,151 @@ type Parser struct {
 	logger              Logger
 }
 
+// NewParser creates a parser. By default the pool is sized to GOMAXPROCS; use
+// WithPoolSize to override it.
+//
+// One instance is created eagerly so that configuration errors surface here,
+// and the rest are created on demand.
 func NewParser(ctx context.Context, options ...ParserOption) (*Parser, error) {
-	runtime, err := wasm.NewRuntime(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to instantiate wasm runtime: %w", err)
-	}
-
 	parser := &Parser{
-		runtime: runtime,
-		logger:  NewNullLogger(),
+		poolSize: runtime.GOMAXPROCS(0),
+		logger:   NewNullLogger(),
 	}
 
 	for _, opt := range options {
 		opt(parser)
 	}
 
+	if parser.poolSize < 1 {
+		return nil, fmt.Errorf("pool size must be at least 1, got %d", parser.poolSize)
+	}
+
+	parser.pool = make(chan *wasm.Runtime, parser.poolSize)
+
+	instance, err := wasm.NewRuntime(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to instantiate wasm runtime: %w", err)
+	}
+
+	parser.created = 1
+	parser.pool <- instance
+
 	return parser, nil
 }
 
+// Close releases every instance in the pool. It is safe to call more than
+// once. Parse returns an error after Close returns.
 func (p *Parser) Close(ctx context.Context) error {
 	p.mutex.Lock()
-	defer p.mutex.Unlock()
 
-	if err := p.runtime.Close(ctx); err != nil {
-		return fmt.Errorf("failed to close the wasm runtime: %w", err)
+	if p.closed {
+		p.mutex.Unlock()
+		return nil
 	}
 
-	return nil
+	p.closed = true
+	pending := p.created
+	p.mutex.Unlock()
+
+	// Every instance is either idle in the pool or checked out by a Parse
+	// that will return it, so draining exactly the number created waits out
+	// the in-flight parses without holding the lock.
+	var firstErr error
+
+	for i := 0; i < pending; i++ {
+		instance := <-p.pool
+
+		if err := instance.Close(ctx); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close the wasm runtime: %w", err)
+		}
+	}
+
+	close(p.pool)
+
+	return firstErr
 }
 
-func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult, err error) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+// acquire checks an instance out of the pool, creating one if the pool is
+// empty and has not reached its size limit.
+func (p *Parser) acquire(ctx context.Context) (*wasm.Runtime, error) {
+	// Prefer an idle instance over paying for a new one.
+	select {
+	case instance, ok := <-p.pool:
+		if !ok {
+			return nil, fmt.Errorf("parser is closed")
+		}
 
+		return instance, nil
+	default:
+	}
+
+	p.mutex.Lock()
+
+	if p.closed {
+		p.mutex.Unlock()
+		return nil, fmt.Errorf("parser is closed")
+	}
+
+	if p.created < p.poolSize {
+		p.created++
+		p.mutex.Unlock()
+
+		instance, err := wasm.NewRuntime(ctx)
+		if err != nil {
+			// Give the slot back so a later parse can retry.
+			p.mutex.Lock()
+			p.created--
+			p.mutex.Unlock()
+
+			return nil, fmt.Errorf("failed to instantiate wasm runtime: %w", err)
+		}
+
+		return instance, nil
+	}
+
+	p.mutex.Unlock()
+
+	// The pool is at its limit, so wait for an instance to come back.
+	select {
+	case instance, ok := <-p.pool:
+		if !ok {
+			return nil, fmt.Errorf("parser is closed")
+		}
+
+		return instance, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// release returns an instance to the pool.
+func (p *Parser) release(instance *wasm.Runtime) {
+	// Close drains exactly the number of instances created, so a checked-out
+	// instance must be returned even once the parser is closing.
+	defer func() {
+		// The pool is closed only after every instance has been drained,
+		// so this can race only if release is called twice.
+		_ = recover()
+	}()
+
+	p.pool <- instance
+}
+
+// Parse parses source and returns the resulting tree. It is safe to call from
+// multiple goroutines; each call runs on its own WebAssembly instance.
+func (p *Parser) Parse(ctx context.Context, source []byte) (*ParseResult, error) {
+	instance, err := p.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer p.release(instance)
+
+	return p.parseWith(ctx, instance, source)
+}
+
+// parseWith runs a parse on an already acquired instance.
+func (p *Parser) parseWith(ctx context.Context, instance *wasm.Runtime, source []byte) (result *ParseResult, err error) {
 	result = nil
 	err = nil
 
@@ -70,7 +198,7 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 	// Always allocate at least one byte. calloc(1, 0) may return a zero-sized
 	// allocation that Prism still dereferences, and it makes the pointer
 	// indistinguishable from a failed allocation.
-	sourcePtr, err := p.runtime.Calloc(ctx, 1, uint64(len(source))+1)
+	sourcePtr, err := instance.Calloc(ctx, 1, uint64(len(source))+1)
 	p.logger.Debug("sourcePtr: %v", sourcePtr)
 
 	if err != nil {
@@ -78,13 +206,13 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 	}
 
 	defer func() {
-		if freeErr := p.runtime.Free(ctx, sourcePtr); freeErr != nil && err == nil {
+		if freeErr := instance.Free(ctx, sourcePtr); freeErr != nil && err == nil {
 			result = nil
 			err = fmt.Errorf("failed to free memory for source ptr: %w", freeErr)
 		}
 	}()
 
-	if !p.runtime.MemoryWrite(sourcePtr, source) {
+	if !instance.MemoryWrite(sourcePtr, source) {
 		return nil, fmt.Errorf("failed to write the source into memory")
 	}
 
@@ -119,7 +247,7 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 		return nil, fmt.Errorf("failed to serialize the parser options: %w", err)
 	}
 
-	optPtr, err := p.runtime.Calloc(ctx, 1, uint64(len(serializedOptions))+1)
+	optPtr, err := instance.Calloc(ctx, 1, uint64(len(serializedOptions))+1)
 	p.logger.Debug("optPtr: %v", optPtr)
 
 	if err != nil {
@@ -127,35 +255,35 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 	}
 
 	defer func() {
-		if freeErr := p.runtime.Free(ctx, optPtr); freeErr != nil && err == nil {
+		if freeErr := instance.Free(ctx, optPtr); freeErr != nil && err == nil {
 			result = nil
 			err = fmt.Errorf("failed to free memory for option ptr: %w", freeErr)
 		}
 	}()
 
-	if !p.runtime.MemoryWrite(optPtr, serializedOptions) {
+	if !instance.MemoryWrite(optPtr, serializedOptions) {
 		return nil, fmt.Errorf("failed to write the options into memory")
 	}
 
 	// call the serialize parse function
-	bufferSizeOf, err := p.runtime.BufferSizeOf(ctx)
+	bufferSizeOf, err := instance.BufferSizeOf(ctx)
 	p.logger.Debug("bufferSizeOf: %v", bufferSizeOf)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the buffer size: %w", err)
 	}
 
-	bufferPtr, err := p.runtime.Calloc(ctx, bufferSizeOf, 1)
+	bufferPtr, err := instance.Calloc(ctx, bufferSizeOf, 1)
 	p.logger.Debug("bufferPtr: %v", bufferPtr)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the buffer ptr: %w", err)
 	}
 
-	if err := p.runtime.BufferInit(ctx, bufferPtr); err != nil {
+	if err := instance.BufferInit(ctx, bufferPtr); err != nil {
 		// pm_buffer_init failed, so there is no internal value to clean up.
 		// Release the struct allocation directly.
-		if freeErr := p.runtime.Free(ctx, bufferPtr); freeErr != nil {
+		if freeErr := instance.Free(ctx, bufferPtr); freeErr != nil {
 			p.logger.Debug("failed to free buffer ptr after failed init: %v", freeErr)
 		}
 
@@ -165,32 +293,32 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 	// pm_buffer_free releases both the internal value and the pm_buffer_t
 	// struct itself, so it must not be paired with an extra free(bufferPtr).
 	defer func() {
-		if freeErr := p.runtime.BufferFree(ctx, bufferPtr); freeErr != nil && err == nil {
+		if freeErr := instance.BufferFree(ctx, bufferPtr); freeErr != nil && err == nil {
 			result = nil
 			err = fmt.Errorf("failed to free memory for buffer ptr: %w", freeErr)
 		}
 	}()
 
-	if _, err := p.runtime.SerializeParse(ctx, bufferPtr, sourcePtr, uint64(len(source)), optPtr); err != nil {
+	if _, err := instance.SerializeParse(ctx, bufferPtr, sourcePtr, uint64(len(source)), optPtr); err != nil {
 		return nil, fmt.Errorf("failed to call the parse function: %w", err)
 	}
 
 	// read result from memory
-	bufferValue, err := p.runtime.BufferValue(ctx, bufferPtr)
+	bufferValue, err := instance.BufferValue(ctx, bufferPtr)
 	p.logger.Debug("bufferValue: %v", bufferValue)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the buffer value: %w", err)
 	}
 
-	bufferLen, err := p.runtime.BufferLength(ctx, bufferPtr)
+	bufferLen, err := instance.BufferLength(ctx, bufferPtr)
 	p.logger.Debug("bufferLen: %v", bufferLen)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the buffer length: %w", err)
 	}
 
-	serializedBytes, ok := p.runtime.MemoryRead(bufferValue, bufferLen)
+	serializedBytes, ok := instance.MemoryRead(bufferValue, bufferLen)
 	p.logger.Debug("serializedBytes: %v", serializedBytes)
 
 	if !ok {
@@ -272,5 +400,16 @@ func WithScopes(scopes [][][]byte) ParserOption {
 func WithLogger(logger Logger) ParserOption {
 	return func(p *Parser) {
 		p.logger = logger
+	}
+}
+
+// WithPoolSize sets how many WebAssembly instances the parser may hold, which
+// is the number of parses it can run at once. It defaults to GOMAXPROCS.
+//
+// Each instance carries its own linear memory, so a larger pool trades memory
+// for concurrency. A size of 1 serializes every parse onto a single instance.
+func WithPoolSize(size int) ParserOption {
+	return func(p *Parser) {
+		p.poolSize = size
 	}
 }

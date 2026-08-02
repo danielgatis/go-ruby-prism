@@ -268,8 +268,20 @@ Parses the provided Ruby code and returns the resulting AST.
 A single parser can be reused for any number of `Parse` calls, including across
 different files, and this is the recommended way to process a batch of sources —
 creating a parser instantiates the WebAssembly module, which costs far more than
-a parse. `Parse` is safe to call from multiple goroutines; calls are serialized
-internally, so use a parser per goroutine if you want parses to run in parallel.
+a parse.
+
+`Parse` is safe to call from multiple goroutines. A parser holds a pool of
+WebAssembly instances and each call runs on its own instance, so parses proceed
+in parallel rather than queueing behind one another. The pool is filled on
+demand, so a program that only ever parses one file at a time pays for a single
+instance.
+
+#### `WithPoolSize(size int) ParserOption`
+
+Sets how many instances the pool may hold, which caps how many parses can run
+at once. It defaults to `GOMAXPROCS`. Each instance carries its own linear
+memory, so a larger pool trades memory for concurrency; a size of 1 serializes
+every parse onto one instance.
 
 #### `Close(ctx context.Context) error`
 
@@ -298,6 +310,9 @@ parser.WithMainScript(true)
 
 // Configure local variable scopes
 parser.WithScopes([][][]byte{{[]byte("local_var")}})
+
+// Configure how many parses can run at once (defaults to GOMAXPROCS)
+parser.WithPoolSize(16)
 
 // Configure custom logger
 parser.WithLogger(customLogger)
