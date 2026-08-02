@@ -1518,12 +1518,11 @@ type CallNode struct {
 	OpeningLoc      *Location      `json:"opening_loc"`
 	Arguments       *ArgumentsNode `json:"arguments"`
 	ClosingLoc      *Location      `json:"closing_loc"`
-	EqualLoc        *Location      `json:"equal_loc"`
 	Block           Node           `json:"block"`
 }
 
 // NewCallNode creates a new CallNode.
-func NewCallNode(nodeID int, location Location, flags uint32, receiver Node, call_operator_loc *Location, name string, message_loc *Location, opening_loc *Location, arguments *ArgumentsNode, closing_loc *Location, equal_loc *Location, block Node) *CallNode {
+func NewCallNode(nodeID int, location Location, flags uint32, receiver Node, call_operator_loc *Location, name string, message_loc *Location, opening_loc *Location, arguments *ArgumentsNode, closing_loc *Location, block Node) *CallNode {
 	return &CallNode{
 		NodeID:          nodeID,
 		Location:        location,
@@ -1535,7 +1534,6 @@ func NewCallNode(nodeID int, location Location, flags uint32, receiver Node, cal
 		OpeningLoc:      opening_loc,
 		Arguments:       arguments,
 		ClosingLoc:      closing_loc,
-		EqualLoc:        equal_loc,
 		Block:           block,
 	}
 }
@@ -1618,7 +1616,6 @@ func (n *CallNode) ToJSON() map[string]interface{} {
 		"opening_loc":       n.OpeningLoc,
 		"arguments":         n.Arguments,
 		"closing_loc":       n.ClosingLoc,
-		"equal_loc":         n.EqualLoc,
 		"block":             n.Block,
 	}
 }
@@ -4002,9 +3999,6 @@ func (n *FalseNode) ToJSON() map[string]interface{} {
 //
 //	foo in Foo(*bar, baz, *qux)
 //	       ^^^^^^^^^^^^^^^^^^^^
-//
-//	foo => *bar, baz, *qux
-//	       ^^^^^^^^^^^^^^^
 type FindPatternNode struct {
 	NodeID     int      `json:"nodeID"`
 	Location   Location `json:"location"`
@@ -4424,15 +4418,10 @@ func (n *ForwardingParameterNode) ToJSON() map[string]interface{} {
 	}
 }
 
-// Represents the use of the `super` keyword without parentheses or arguments, but which might have a block.
+// Represents the use of the `super` keyword without parentheses or arguments.
 //
 //	super
 //	^^^^^
-//
-//	super { 123 }
-//	^^^^^^^^^^^^^
-//
-// If it has any other arguments, it would be a `SuperNode` instead.
 type ForwardingSuperNode struct {
 	NodeID   int      `json:"nodeID"`
 	Location Location `json:"location"`
@@ -4961,12 +4950,6 @@ func (n *HashNode) ToJSON() map[string]interface{} {
 //
 //	foo => { a: 1, b: 2, **c }
 //	       ^^^^^^^^^^^^^^^^^^^
-//
-//	foo => Bar[a: 1, b: 2]
-//	       ^^^^^^^^^^^^^^^
-//
-//	foo in { a: 1, b: 2 }
-//	       ^^^^^^^^^^^^^^
 type HashPatternNode struct {
 	NodeID     int      `json:"nodeID"`
 	Location   Location `json:"location"`
@@ -7414,9 +7397,6 @@ func (n *LocalVariableReadNode) ToJSON() map[string]interface{} {
 //
 //	foo, bar = baz
 //	^^^  ^^^
-//
-//	foo => baz
-//	       ^^^
 type LocalVariableTargetNode struct {
 	NodeID   int      `json:"nodeID"`
 	Location Location `json:"location"`
@@ -10667,8 +10647,6 @@ func (n *StringNode) ToJSON() map[string]interface{} {
 //
 //	super foo, bar
 //	^^^^^^^^^^^^^^
-//
-// If no arguments are provided (except for a block), it would be a `ForwardingSuperNode` instead.
 type SuperNode struct {
 	NodeID     int      `json:"nodeID"`
 	Location   Location `json:"location"`

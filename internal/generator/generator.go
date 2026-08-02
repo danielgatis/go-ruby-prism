@@ -66,12 +66,21 @@ func Render(name string, config *Config) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Generate renders every template and writes the results into dir.
-func Generate(configPath, dir string) error {
+// Generate renders every template and writes the results into dir. versionPath
+// points at prism's include/prism/version.h, which supplies the version the
+// deserializer checks against.
+func Generate(configPath, versionPath, dir string) error {
 	config, err := Load(configPath)
 	if err != nil {
 		return err
 	}
+
+	version, err := ReadVersion(versionPath)
+	if err != nil {
+		return err
+	}
+
+	config.Version = version
 
 	outputs := map[string]string{
 		"gen_nodes.go.tmpl":        "gen_nodes.go",

@@ -266,6 +266,7 @@ func TestNodeFields(t *testing.T) {
 		{"CallNode", "OpeningLoc", "*Location", "opening_loc"},
 		{"CallNode", "Arguments", "*ArgumentsNode", "arguments"},
 		{"CallNode", "ClosingLoc", "*Location", "closing_loc"},
+		{"CallNode", "EqualLoc", "*Location", "equal_loc"},
 		{"CallNode", "Block", "Node", "block"},
 		{"CallOperatorWriteNode", "Receiver", "Node", "receiver"},
 		{"CallOperatorWriteNode", "CallOperatorLoc", "*Location", "call_operator_loc"},
@@ -774,6 +775,7 @@ func TestOptionalFieldsAreNilable(t *testing.T) {
 		{"CallNode", "OpeningLoc"},
 		{"CallNode", "Arguments"},
 		{"CallNode", "ClosingLoc"},
+		{"CallNode", "EqualLoc"},
 		{"CallNode", "Block"},
 		{"CallOperatorWriteNode", "Receiver"},
 		{"CallOperatorWriteNode", "CallOperatorLoc"},
@@ -983,7 +985,7 @@ func TestFlagBits(t *testing.T) {
 // TestErrorAndWarningTypes checks that the diagnostic tables line up with
 // config.yml, since they are indexed positionally during deserialization.
 func TestErrorAndWarningTypes(t *testing.T) {
-	if got, want := len(errorTypes), 289; got != want {
+	if got, want := len(errorTypes), 294; got != want {
 		t.Errorf("errorTypes length = %d, want %d", got, want)
 	}
 

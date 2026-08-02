@@ -19,7 +19,7 @@ import (
 
 const (
 	majorVersion = 1
-	minorVersion = 9
+	minorVersion = 4
 	patchVersion = 0
 )
 
@@ -295,7 +295,6 @@ var errorTypes = []string{
 	"conditional_while_predicate",
 	"constant_path_colon_colon_constant",
 	"def_endless",
-	"def_endless_parameters",
 	"def_endless_setter",
 	"def_name",
 	"def_params_term",
@@ -337,8 +336,6 @@ var errorTypes = []string{
 	"expect_for_delimiter",
 	"expect_ident_req_parameter",
 	"expect_in_delimiter",
-	"expect_lparen_after_not_lparen",
-	"expect_lparen_after_not_other",
 	"expect_lparen_req_parameter",
 	"expect_message",
 	"expect_rbracket",
@@ -454,7 +451,6 @@ var errorTypes = []string{
 	"parameter_wild_loose_comma",
 	"pattern_array_multiple_rests",
 	"pattern_capture_duplicate",
-	"pattern_capture_in_alternative",
 	"pattern_expression_after_bracket",
 	"pattern_expression_after_comma",
 	"pattern_expression_after_hrocket",
@@ -516,7 +512,6 @@ var errorTypes = []string{
 	"unexpected_index_keywords",
 	"unexpected_label",
 	"unexpected_multi_write",
-	"unexpected_parameter_default_value",
 	"unexpected_range_operator",
 	"unexpected_safe_navigation",
 	"unexpected_token_close_context",
@@ -932,7 +927,7 @@ func readRequiredNodeImpl(buffer *SerializationBuffer, constants []*string, cons
 				return n.(*ArgumentsNode)
 			}
 			return nil
-		}(), buffer.ReadOptionalLocation(), buffer.ReadOptionalLocation(), func() Node {
+		}(), buffer.ReadOptionalLocation(), func() Node {
 			if n := readOptionalNode(); n != nil {
 				return n
 			}

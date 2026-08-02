@@ -12,10 +12,11 @@ import (
 
 func main() {
 	config := flag.String("config", "config.yml", "path to prism's config.yml")
+	version := flag.String("version", "prism/include/prism/version.h", "path to prism's version.h")
 	out := flag.String("out", "parser", "directory to write the generated files into")
 	flag.Parse()
 
-	if err := generator.Generate(*config, *out); err != nil {
+	if err := generator.Generate(*config, *version, *out); err != nil {
 		log.Fatal(err)
 	}
 }

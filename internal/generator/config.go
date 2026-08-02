@@ -7,6 +7,7 @@ package generator
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -30,6 +31,9 @@ type Config struct {
 	Tokens   []NamedEntry `yaml:"tokens"`
 	Flags    []Flags      `yaml:"flags"`
 	Nodes    []Node       `yaml:"nodes"`
+
+	// Version is filled in from prism's version.h rather than config.yml.
+	Version Version `yaml:"-"`
 }
 
 // NamedEntry is an errors/warnings/tokens entry. These are written in
@@ -98,6 +102,57 @@ type Field struct {
 	// RawKind is the unprocessed kind entry from config.yml, which may be a
 	// string or a list mixing strings and "on error" mappings.
 	RawKind yaml.Node `yaml:"kind"`
+}
+
+// Version is the prism version the generated code expects to deserialize.
+type Version struct {
+	Major int
+	Minor int
+	Patch int
+}
+
+// ReadVersion parses prism's include/prism/version.h. The deserializer rejects
+// a serialized tree whose version does not match, so this has to track the
+// prism.wasm that was built from the same checkout.
+func ReadVersion(path string) (Version, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Version{}, fmt.Errorf("failed to read version header: %w", err)
+	}
+
+	var version Version
+
+	fields := map[string]*int{
+		"PRISM_VERSION_MAJOR": &version.Major,
+		"PRISM_VERSION_MINOR": &version.Minor,
+		"PRISM_VERSION_PATCH": &version.Patch,
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) != 3 || parts[0] != "#define" {
+			continue
+		}
+
+		target, ok := fields[parts[1]]
+		if !ok {
+			continue
+		}
+
+		value, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return Version{}, fmt.Errorf("failed to parse %s: %w", parts[1], err)
+		}
+
+		*target = value
+		delete(fields, parts[1])
+	}
+
+	if len(fields) != 0 {
+		return Version{}, fmt.Errorf("version header %s is missing %d field(s)", path, len(fields))
+	}
+
+	return version, nil
 }
 
 // Load reads and resolves a config.yml.

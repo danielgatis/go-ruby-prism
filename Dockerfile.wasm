@@ -1,0 +1,56 @@
+# Builds prism.wasm from the pinned prism submodule.
+#
+# The build needs Ruby (prism generates its own C sources with rake) and the
+# WASI SDK toolchain. Keeping both in an image means contributors do not have
+# to install either, and the resulting binary does not depend on which host
+# built it.
+# Alpine is not usable here: the WASI SDK ships glibc-linked binaries, and its
+# clang aborts under musl even with gcompat installed. slim is the smallest
+# glibc base that works.
+FROM ruby:3.4-slim-bookworm AS build
+
+ARG WASI_SDK_VERSION=25
+ARG WASI_SDK_RELEASE=25.0
+
+# build-essential compiles the native extensions in prism's Gemfile; the wasm
+# itself is built by the WASI SDK's own clang.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential curl make ca-certificates \
+        libyaml-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# The WASI SDK ships per-architecture tarballs, so pick the one matching the
+# build platform. TARGETARCH is provided by BuildKit.
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+        amd64) WASI_ARCH=x86_64 ;; \
+        arm64) WASI_ARCH=arm64 ;; \
+        *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/wasi-sdk.tar.gz \
+        "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_RELEASE}-${WASI_ARCH}-linux.tar.gz" \
+    && mkdir -p /opt/wasi-sdk \
+    && tar xzf /tmp/wasi-sdk.tar.gz -C /opt/wasi-sdk --strip-components=1 \
+    && rm /tmp/wasi-sdk.tar.gz
+
+WORKDIR /prism
+
+# The Gemfile uses `gemspec`, so the gemspec and the version it reads have to
+# be present before bundler can resolve anything.
+COPY prism/Gemfile prism/Gemfile.lock prism/*.gemspec ./
+COPY prism/include/prism/version.h ./include/prism/version.h
+RUN bundle install
+
+COPY prism/ ./
+
+# templates generates prism's C sources from config.yml; wasm then compiles
+# them against the WASI sysroot.
+RUN bundle exec rake templates \
+    && make wasm WASI_SDK_PATH=/opt/wasi-sdk
+
+# The final image only has to hand back the built module, so nothing from the
+# toolchain is carried over. scratch keeps it down to the wasm itself.
+FROM scratch
+
+COPY --from=build /prism/javascript/src/prism.wasm /prism.wasm

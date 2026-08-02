@@ -50,6 +50,21 @@ cd go-ruby-prism
 make all
 ```
 
+### Rebuilding from prism
+
+`prism.wasm` and the generated parser sources are committed, so using the
+library needs nothing beyond Go. Rebuilding them is only necessary when the
+prism submodule moves:
+
+```bash
+make wasm_build   # compiles prism.wasm in Docker; needs Docker, not Ruby
+make config       # copies config.yml out of the submodule
+make generate     # regenerates the parser sources with the Go generator
+```
+
+Code generation reads prism's `config.yml` directly, so neither Ruby nor the
+WASI SDK has to be installed. `go generate ./...` runs the same generator.
+
 ## Quick Start
 
 ### Basic Example

@@ -1,13 +1,32 @@
 PRISM_SOURCE_DIR := prism
-ROOT_SOURCE_DIR := .
+WASM_IMAGE := prism-wasm
 
-.PHONY: all
+.PHONY: all init_submodules wasm_build config generate format test clean
 
-all: init_submodules wasm_build generate format
+all: init_submodules wasm_build config generate format
 
 init_submodules:
 		@echo "Initializing submodules"
 		git submodule update --init --recursive
+
+# Builds prism.wasm inside a container so that neither Ruby nor the WASI SDK
+# has to be installed on the host. prism.wasm is committed, so this only needs
+# to run when the prism submodule moves.
+# The image is a scratch layer holding only prism.wasm, so the module is
+# copied out of a container rather than run out of one.
+wasm_build:
+		@echo "Building wasm"
+		docker build -f Dockerfile.wasm -t $(WASM_IMAGE) .
+		$(eval CID := $(shell docker create $(WASM_IMAGE)))
+		docker cp $(CID):/prism.wasm wasm/prism.wasm
+		docker rm -v $(CID) >/dev/null
+		@echo "Wrote wasm/prism.wasm"
+
+# Copies the node definitions out of the pinned submodule. The generator reads
+# this file, so it has to stay in step with prism.wasm.
+config:
+		@echo "Syncing config.yml from $(PRISM_SOURCE_DIR)"
+		cp $(PRISM_SOURCE_DIR)/config.yml config.yml
 
 generate:
 		@echo "Generating go files"
@@ -18,29 +37,11 @@ format:
 		@echo "Formatting go files"
 		go fmt ./...
 
-wasm_build:
-		@echo "Building wasm"
-		rm -fr prism/javascript/src/prism.wasm
-
-		cd prism && bundle install
-		cd prism && bundle exec rake compile
-
-		if [ ! -d wasi-sdk-25.0-arm64-macos ]; then \
-			if [ ! -f wasi-sdk-25.0-arm64-macos.tar.gz ]; then \
-				wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sdk-25.0-arm64-macos.tar.gz; \
-			fi; \
-			tar xvf wasi-sdk-25.0-arm64-macos.tar.gz; \
-		fi
-
-		cd $(PRISM_SOURCE_DIR) && bundle exec rake templates
-		cd $(PRISM_SOURCE_DIR) && make wasm WASI_SDK_PATH=../wasi-sdk-25.0-arm64-macos
-		cp -f prism/javascript/src/prism.wasm wasm
+test:
+		@echo "Running tests"
+		go test -race ./...
 
 clean:
 		@echo "Cleaning up"
-		rm -fr priprism/javascript/src/prism.wasm
 		rm -fr wasm/prism.wasm
-		rm -fr wasi-sdk-25.0-arm64-macos.tar.gz
-		rm -fr wasi-sdk-25.0-arm64-macos
-		cd prism && bundle exec rake clean
-		cd $(PRISM_SOURCE_DIR) && make clean
+		docker image rm -f $(WASM_IMAGE) 2>/dev/null || true

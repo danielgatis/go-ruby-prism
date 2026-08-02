@@ -14,7 +14,7 @@ import (
 func TestGeneratedFilesAreUpToDate(t *testing.T) {
 	dir := t.TempDir()
 
-	if err := Generate("../../config.yml", dir); err != nil {
+	if err := Generate("../../config.yml", "../../prism/include/prism/version.h", dir); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 
