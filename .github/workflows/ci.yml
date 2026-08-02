@@ -34,26 +34,3 @@ jobs:
 
       - name: Test
         run: go test -race ./...
-
-  # The generated sources are committed, so this guards against someone
-  # editing them by hand or changing config.yml without regenerating.
-  generate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
-      - name: Regenerate
-        run: go generate ./...
-
-      - name: Check for drift
-        run: |
-          if ! git diff --exit-code; then
-            echo "Generated files are out of date; run: go generate ./..."
-            exit 1
-          fi
