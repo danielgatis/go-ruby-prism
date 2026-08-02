@@ -250,6 +250,12 @@ Creates a new parser instance with the specified options.
 
 Parses the provided Ruby code and returns the resulting AST.
 
+A single parser can be reused for any number of `Parse` calls, including across
+different files, and this is the recommended way to process a batch of sources —
+creating a parser instantiates the WebAssembly module, which costs far more than
+a parse. `Parse` is safe to call from multiple goroutines; calls are serialized
+internally, so use a parser per goroutine if you want parses to run in parallel.
+
 #### `Close(ctx context.Context) error`
 
 Releases WebAssembly runtime resources. Should always be called when the parser is no longer needed.

@@ -67,15 +67,25 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 		}
 	}()
 
-	sourcePtr, err := p.runtime.Calloc(ctx, 1, uint64(len(source)))
+	// Always allocate at least one byte. calloc(1, 0) may return a zero-sized
+	// allocation that Prism still dereferences, and it makes the pointer
+	// indistinguishable from a failed allocation.
+	sourcePtr, err := p.runtime.Calloc(ctx, 1, uint64(len(source))+1)
 	p.logger.Debug("sourcePtr: %v", sourcePtr)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate memory for source: %w", err)
 	}
 
+	defer func() {
+		if freeErr := p.runtime.Free(ctx, sourcePtr); freeErr != nil && err == nil {
+			result = nil
+			err = fmt.Errorf("failed to free memory for source ptr: %w", freeErr)
+		}
+	}()
+
 	if !p.runtime.MemoryWrite(sourcePtr, source) {
-		return nil, fmt.Errorf("failed to write the source into memory: %w", err)
+		return nil, fmt.Errorf("failed to write the source into memory")
 	}
 
 	p.logger.Debug("source: %v", source)
@@ -109,15 +119,22 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 		return nil, fmt.Errorf("failed to serialize the parser options: %w", err)
 	}
 
-	optPtr, err := p.runtime.Calloc(ctx, 1, uint64(len(serializedOptions)))
+	optPtr, err := p.runtime.Calloc(ctx, 1, uint64(len(serializedOptions))+1)
 	p.logger.Debug("optPtr: %v", optPtr)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate memory for options: %w", err)
 	}
 
+	defer func() {
+		if freeErr := p.runtime.Free(ctx, optPtr); freeErr != nil && err == nil {
+			result = nil
+			err = fmt.Errorf("failed to free memory for option ptr: %w", freeErr)
+		}
+	}()
+
 	if !p.runtime.MemoryWrite(optPtr, serializedOptions) {
-		return nil, fmt.Errorf("failed to write the options into memory: %w", err)
+		return nil, fmt.Errorf("failed to write the options into memory")
 	}
 
 	// call the serialize parse function
@@ -136,8 +153,23 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 	}
 
 	if err := p.runtime.BufferInit(ctx, bufferPtr); err != nil {
+		// pm_buffer_init failed, so there is no internal value to clean up.
+		// Release the struct allocation directly.
+		if freeErr := p.runtime.Free(ctx, bufferPtr); freeErr != nil {
+			p.logger.Debug("failed to free buffer ptr after failed init: %v", freeErr)
+		}
+
 		return nil, fmt.Errorf("failed to init the buffer: %w", err)
 	}
+
+	// pm_buffer_free releases both the internal value and the pm_buffer_t
+	// struct itself, so it must not be paired with an extra free(bufferPtr).
+	defer func() {
+		if freeErr := p.runtime.BufferFree(ctx, bufferPtr); freeErr != nil && err == nil {
+			result = nil
+			err = fmt.Errorf("failed to free memory for buffer ptr: %w", freeErr)
+		}
+	}()
 
 	if _, err := p.runtime.SerializeParse(ctx, bufferPtr, sourcePtr, uint64(len(source)), optPtr); err != nil {
 		return nil, fmt.Errorf("failed to call the parse function: %w", err)
@@ -162,7 +194,7 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 	p.logger.Debug("serializedBytes: %v", serializedBytes)
 
 	if !ok {
-		return nil, fmt.Errorf("failed to read the buffer content from memory: %w", err)
+		return nil, fmt.Errorf("failed to read the buffer content from memory")
 	}
 
 	result, err = Deserialize(source, serializedBytes)
@@ -170,23 +202,6 @@ func (p *Parser) Parse(ctx context.Context, source []byte) (result *ParseResult,
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize the result: %w", err)
-	}
-
-	// free memory
-	if err := p.runtime.BufferFree(ctx, bufferPtr); err != nil {
-		return nil, fmt.Errorf("failed to free memory for buffer ptr: %w", err)
-	}
-
-	if err := p.runtime.Free(ctx, sourcePtr); err != nil {
-		return nil, fmt.Errorf("failed to free memory for source ptr: %w", err)
-	}
-
-	if err := p.runtime.Free(ctx, bufferPtr); err != nil {
-		return nil, fmt.Errorf("failed to free memory for buffer ptr: %w", err)
-	}
-
-	if err := p.runtime.Free(ctx, optPtr); err != nil {
-		return nil, fmt.Errorf("failed to free memory for option ptr: %w", err)
 	}
 
 	return result, nil
