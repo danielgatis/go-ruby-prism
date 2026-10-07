@@ -3,6 +3,7 @@ package parser
 import (
 	"context"
 	"fmt"
+	"github.com/tetratelabs/wazero"
 	"runtime"
 	"sync"
 
@@ -38,6 +39,7 @@ type Parser struct {
 	partialScript       bool
 	scopes              [][][]byte
 	logger              Logger
+	runtimeConfig       wazero.RuntimeConfig
 }
 
 // NewParser creates a parser. By default the pool is sized to GOMAXPROCS; use
@@ -61,7 +63,7 @@ func NewParser(ctx context.Context, options ...ParserOption) (*Parser, error) {
 
 	parser.pool = make(chan *wasm.Runtime, parser.poolSize)
 
-	instance, err := wasm.NewRuntime(ctx)
+	instance, err := wasm.NewRuntimeWithConfig(ctx, parser.runtimeConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate wasm runtime: %w", err)
 	}
@@ -129,7 +131,7 @@ func (p *Parser) acquire(ctx context.Context) (*wasm.Runtime, error) {
 		p.created++
 		p.mutex.Unlock()
 
-		instance, err := wasm.NewRuntime(ctx)
+		instance, err := wasm.NewRuntimeWithConfig(ctx, p.runtimeConfig)
 		if err != nil {
 			// Give the slot back so a later parse can retry.
 			p.mutex.Lock()
@@ -336,6 +338,19 @@ func (p *Parser) parseWith(ctx context.Context, instance *wasm.Runtime, source [
 }
 
 type ParserOption func(*Parser)
+
+// WithRuntimeConfig sets the wazero configuration every instance in the pool
+// is created with. The main use is a compilation cache, which keeps the
+// AOT-compiled prism.wasm across processes instead of recompiling it on every
+// NewParser (about 150 ms on an M-series Mac):
+//
+//	cache, _ := wazero.NewCompilationCacheWithDir(dir)
+//	parser.NewParser(ctx, parser.WithRuntimeConfig(wazero.NewRuntimeConfig().WithCompilationCache(cache)))
+func WithRuntimeConfig(config wazero.RuntimeConfig) ParserOption {
+	return func(p *Parser) {
+		p.runtimeConfig = config
+	}
+}
 
 func WithFilePath(filepath string) ParserOption {
 	return func(p *Parser) {
