@@ -63,8 +63,21 @@ type Runtime struct {
 	modPmBufferFree     *ModFunc
 }
 
+// NewRuntime instantiates prism with wazero's default configuration.
 func NewRuntime(ctx context.Context) (*Runtime, error) {
-	runtime := wazero.NewRuntime(ctx)
+	return NewRuntimeWithConfig(ctx, nil)
+}
+
+// NewRuntimeWithConfig instantiates prism with the given wazero configuration;
+// nil means the default. A config carrying a wazero.CompilationCache skips
+// AOT-compiling prism.wasm after the first run.
+func NewRuntimeWithConfig(ctx context.Context, config wazero.RuntimeConfig) (*Runtime, error) {
+	var runtime wazero.Runtime
+	if config == nil {
+		runtime = wazero.NewRuntime(ctx)
+	} else {
+		runtime = wazero.NewRuntimeWithConfig(ctx, config)
+	}
 
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
 	mod, err := runtime.Instantiate(ctx, prismWasm)
